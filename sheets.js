@@ -13,34 +13,16 @@ const path = require('path');
 
 // ── Auth ──────────────────────────────────────────────────────────────
 function getAuth() {
+  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
 
-    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+  credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
 
-        const credentials = JSON.parse(
-            process.env.GOOGLE_SERVICE_ACCOUNT_KEY
-        );
-
-        return new google.auth.GoogleAuth({
-            credentials,
-            scopes: [
-                "https://www.googleapis.com/auth/spreadsheets"
-            ]
-        });
-
-    }
-
-    return new google.auth.GoogleAuth({
-        keyFile: path.resolve(
-            process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH ||
-            "./service-account-key.json"
-        ),
-        scopes: [
-            "https://www.googleapis.com/auth/spreadsheets"
-        ]
-    });
+  return new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
 
 }
-
 function getSheetsClient() {
   return google.sheets({ version: 'v4', auth: getAuth() });
 }
