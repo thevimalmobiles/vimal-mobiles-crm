@@ -28,6 +28,7 @@ const path       = require('path');
 const fs         = require('fs');
 
 const apiRouter  = require('./routes/api');
+const { ensureDefaultUsers } = require('./auth');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -56,12 +57,15 @@ function validateConfig() {
     errors.push('SHEET_ID is not set in .env');
   }
 
-  const keyPath = path.resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './service-account-key.json');
-  if (!fs.existsSync(keyPath)) {
+  const hasKeyEnv  = !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  const keyPath    = path.resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './service-account-key.json');
+  const hasKeyFile = fs.existsSync(keyPath);
+  if (!hasKeyEnv && !hasKeyFile) {
     errors.push(
-      `Service account key not found at: ${keyPath}\n` +
-      '  → Download it from Google Cloud Console → IAM → Service Accounts → Keys\n' +
-      '  → Then share your Google Sheet with the service account email (Editor access)'
+      `No Google credentials found (checked GOOGLE_SERVICE_ACCOUNT_KEY env var and ${keyPath})\n` +
+      '  → Local dev: download a key from Google Cloud Console → IAM → Service Accounts → Keys\n' +
+      '  → Vercel: paste the key JSON into the GOOGLE_SERVICE_ACCOUNT_KEY environment variable\n' +
+      '  → Either way, share your Google Sheet with the service account email (Editor access)'
     );
   }
 
@@ -74,8 +78,19 @@ function validateConfig() {
   }
 }
 
-app.listen(PORT, () => {
-  console.log(`\n✅  Vimal Mobiles CRM running at http://localhost:${PORT}`);
-  console.log('   Press Ctrl+C to stop.\n');
-  validateConfig();
+validateConfig();
+ensureDefaultUsers().catch(err => {
+  console.error('⚠️  Could not seed default users (check Sheet ID / key):', err.message);
 });
+
+// Running locally (`npm start`) → start a normal listening server.
+// Running on Vercel → Vercel calls the exported app as a serverless
+// function per-request, so app.listen() must NOT be called there.
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`\n✅  Vimal Mobiles CRM running at http://localhost:${PORT}`);
+    console.log('   Press Ctrl+C to stop.\n');
+  });
+}
+
+module.exports = app;
