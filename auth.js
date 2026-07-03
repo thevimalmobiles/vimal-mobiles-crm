@@ -22,8 +22,8 @@ async function ensureDefaultUsers() {
   const users = await sheetToObjects('Users');
   if (users.length > 0) return;
 
-  const adminHash = await bcrypt.hash('admin123', 10);
-  const staffHash = await bcrypt.hash('staff123', 10);
+  const adminHash = await bcrypt.hash('12345', 10);
+  const staffHash = await bcrypt.hash('12345', 10);
 
   await upsertRow('Users', 'admin', {
     'Username': 'admin', 'Password Hash': adminHash, 'Role': 'admin', 'Display Name': 'Admin',
