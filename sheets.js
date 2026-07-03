@@ -13,13 +13,14 @@ const path = require('path');
 
 // ── Auth ──────────────────────────────────────────────────────────────
 function getAuth() {
-  const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-
-  return new google.auth.GoogleAuth({
-    credentials,
+  const keyPath = path.resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './service-account-key.json');
+  const auth = new google.auth.GoogleAuth({
+    keyFile: keyPath,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
+  return auth;
 }
+
 function getSheetsClient() {
   return google.sheets({ version: 'v4', auth: getAuth() });
 }
@@ -28,11 +29,23 @@ const SHEET_ID = () => process.env.SHEET_ID;
 
 // ── Tab definitions (mirrors Code.gs TABS) ───────────────────────────
 const TABS = {
-  Inventory: ['Product ID','Product Name','Category','Cost Price','Selling Price','Stock','Supplier Name','Invoice No','Invoice Date'],
+  Inventory: ['Product ID','Product Name','Category','Subcategory','Brand','Model','HSN Code','IMEI','Batch No','Cost Price','Selling Price','Stock','Supplier Name','Invoice No','Invoice Date'],
   Customers: ['Customer ID','Customer Name','Mobile Number','WhatsApp Number','Purchase History'],
   Sales:     ['Sale ID','Date','Item/Customer Name','Type (Product/Repair)','Revenue','Cost','Profit'],
   Repairs:   ['Repair ID','Date','Customer Name','Phone','Brand','Model','Issue','Part Used (Product ID)','Repair Charge','Technician Cost','Status'],
   Expenses:  ['Expense ID','Date','Category','Amount','Notes'],
+  Users:     ['Username','Password Hash','Role','Display Name'],
+};
+
+// Category → allowed subcategories (frontend also has this list; kept here
+// too so server-side validation / AI ingestion can use it)
+const CATEGORIES = {
+  Mobiles: [],
+  Accessories: [
+    'Tempered Glass','Back Cover','Charger','Cable','OTG',
+    'Speaker','Airpods/TWS','Neckband','Computer Accessory','Other Accessory',
+  ],
+  Spares: [],
 };
 
 // ── Ensure tab exists with correct header ────────────────────────────
@@ -198,4 +211,4 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-module.exports = { sheetToObjects, upsertRow, deleteRowById, getLastRow, TABS, today };
+module.exports = { sheetToObjects, upsertRow, deleteRowById, getLastRow, TABS, CATEGORIES, today };
