@@ -64,7 +64,7 @@
 <!-- LOGIN -->
 <div id="login-view">
     <div class="login-card text-center">
-        <img src="logo.png" alt="Vimal Mobiles" style="width:88px;height:88px;border-radius:50%;object-fit:cover;margin-bottom:12px">
+        <img src="logo.png" alt="Vimal Mobiles" style="width:88px;height:88px;border-radius:50%;object-fit:cover;margin-bottom:12px" onerror="this.style.display='none'">
         <h3 class="mb-4 text-primary">Vimal Mobiles</h3>
         <p class="text-muted mb-4">CRM &amp; Billing System</p>
         <div class="mb-3"><input type="text" id="username" class="form-control form-control-lg" placeholder="Username" autocomplete="username"></div>
@@ -78,7 +78,7 @@
 <div class="wrapper hidden" id="main-app">
     <nav id="sidebar">
         <div class="sidebar-header">
-            <img src="logo.png" alt="Vimal Mobiles" style="width:52px;height:52px;border-radius:50%;object-fit:cover;margin-bottom:6px">
+            <img src="logo.png" alt="Vimal Mobiles" style="width:52px;height:52px;border-radius:50%;object-fit:cover;margin-bottom:6px" onerror="this.style.display='none'">
             <h4> The Vimal Mobiles</h4>
             <small id="user-role-badge" class="badge bg-primary mt-2">Admin</small>
         </div>
@@ -155,6 +155,7 @@
                             <div class="cart-totals-row"><span>Subtotal:</span><span>&#8377;<span id="cart-subtotal">0</span></span></div>
                             <div class="cart-totals-row align-items-center"><span>Discount(&#8377;):</span><input type="number" class="form-control form-control-sm w-25 text-end" id="cart-discount" value="0" oninput="app.calculateCart()"></div>
                             <div class="cart-totals-row align-items-center"><span>GST(%):</span><select class="form-select form-select-sm w-25" id="cart-gst" onchange="app.calculateCart()"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option></select></div>
+                            <div class="small text-muted mb-2" style="margin-top:-6px">Mobiles are billed at a fixed 18% GST, already included in their price.</div>
                             <div class="cart-totals-row grand"><span>Grand Total:</span><span>&#8377;<span id="cart-total">0</span></span></div>
                             <select class="form-select mb-2" id="cart-payment-mode" onchange="app.toggleFinanceFields()"><option>Cash</option><option>UPI / GPay</option><option>Card</option><option value="Finance">Finance</option></select>
                             <div id="pos-finance-fields" class="bg-light p-2 rounded mb-2 hidden">
@@ -310,7 +311,7 @@
             </div>
             <div class="row">
                 <div class="col-6 mb-3"><label>Purchase Price (&#8377;)</label><input type="number" id="prod-pprice" class="form-control" value="0"></div>
-                <div class="col-6 mb-3"><label>Selling Price (&#8377;)</label><input type="number" id="prod-sprice" class="form-control" value="0"></div>
+                <div class="col-6 mb-3"><label>Selling Price (&#8377;)</label><input type="number" id="prod-sprice" class="form-control" value="0"><small id="prod-sprice-hint" class="text-muted hidden">Includes 18% GST (Mobiles)</small></div>
             </div>
             <div class="mb-3" id="prod-stock-wrap"><label>Stock</label><input type="number" id="prod-stock" class="form-control" value="1"></div>
         </div>
@@ -424,7 +425,7 @@
 <div id="print-invoice-area">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:15px">
         <div style="display:flex;align-items:center;gap:10px">
-            <img src="logo.png" style="width:50px;height:50px;border-radius:50%;object-fit:cover">
+            <img src="logo.png" style="width:50px;height:50px;border-radius:50%;object-fit:cover" onerror="this.style.display='none'">
             <div>
                 <h3 style="margin:0">THE VIMAL MOBILES</h3>
                 <p style="margin:0;font-size:12px">GSTIN: 33CGFPD7938D1ZL | Mobile: +91 8778470847</p>
@@ -508,6 +509,10 @@ var SHOP_CONFIG = {
         'Customer should verify & sign with date on the invoice below.',
     ],
 };
+
+// GST rate that is always applied — and always already included — in the
+// Selling Price of a "Mobiles" category product.
+var MOBILE_GST_RATE = 18;
 
 // ═══════════════════════════════════════════════════════════════════════
 // LOCAL IN-MEMORY DATABASE  (populated from /api/crm-data on startup)
@@ -849,7 +854,7 @@ var app = {
         if (!p || p.stock <= 0) { this.showAlert('Out of stock!', 'warning'); return; }
         var ex = this.cart.find(function(x){ return x.id === id; });
         if (ex) { if (ex.qty >= p.stock) { this.showAlert('Cannot exceed available stock', 'warning'); return; } ex.qty++; }
-        else this.cart.push({ id: p.id, name: p.name, price: p.price, qty: 1, hsn: p.hsn || '' });
+        else this.cart.push({ id: p.id, name: p.name, price: p.price, qty: 1, hsn: p.hsn || '', category: p.category || '' });
         this.renderCart();
     },
 
@@ -872,15 +877,44 @@ var app = {
         this.calculateCart();
     },
 
+    // Splits the cart into Mobile vs non-Mobile lines and works out the
+    // taxable value / GST for each:
+    //  - Mobiles: Selling Price already INCLUDES 18% GST — no extra tax
+    //    is added on top, we just back-calculate the taxable/GST split
+    //    for the invoice.
+    //  - Everything else: taxed exclusively at the selected GST(%)
+    //    dropdown, added on top after the discount is applied.
+    computeCartTotals: function(items, discount, gstPercent) {
+        discount = discount || 0;
+        gstPercent = gstPercent || 0;
+        var mobileSub = 0, otherSub = 0;
+        items.forEach(function(i) {
+            var lineTotal = (i.price || 0) * (i.qty || 0);
+            if (i.category === 'Mobiles') mobileSub += lineTotal; else otherSub += lineTotal;
+        });
+        var otherAfterDisc = Math.max(0, otherSub - discount);
+        var otherGst   = otherAfterDisc * gstPercent / 100;
+        var otherTotal = otherAfterDisc + otherGst;
+        var mobileTaxable = mobileSub / (1 + MOBILE_GST_RATE / 100);
+        var mobileGst      = mobileSub - mobileTaxable;
+        return {
+            subtotal:      mobileSub + otherSub,
+            mobileSubtotal: mobileSub,
+            otherSubtotal:  otherSub,
+            taxableAmount: otherAfterDisc + mobileTaxable,
+            gstAmount:     otherGst + mobileGst,
+            total:         otherTotal + mobileSub,
+        };
+    },
+
     calculateCart: function() {
-        var sub  = this.cart.reduce(function(s,i){ return s + (i.price * i.qty); }, 0);
         var disc = parseFloat(document.getElementById('cart-discount').value) || 0;
         var gst  = parseFloat(document.getElementById('cart-gst').value) || 0;
-        var total = (sub - disc) * (1 + gst / 100);
-        document.getElementById('cart-subtotal').innerText = sub.toFixed(2);
-        document.getElementById('cart-total').innerText    = total.toFixed(2);
+        var t = this.computeCartTotals(this.cart, disc, gst);
+        document.getElementById('cart-subtotal').innerText = t.subtotal.toFixed(2);
+        document.getElementById('cart-total').innerText    = t.total.toFixed(2);
         var dp = parseFloat(document.getElementById('pos-fin-downpayment').value) || 0;
-        document.getElementById('pos-fin-loan-amount-text').innerText = Math.max(0, total - dp).toFixed(2);
+        document.getElementById('pos-fin-loan-amount-text').innerText = Math.max(0, t.total - dp).toFixed(2);
     },
 
     toggleFinanceFields: function() {
@@ -896,12 +930,13 @@ var app = {
         var address = document.getElementById('cart-customer-address').value.trim();
         var payMode = document.getElementById('cart-payment-mode').value;
         if (!mobile) { this.showAlert('Please enter customer mobile', 'warning'); return; }
-        var sub   = parseFloat(document.getElementById('cart-subtotal').innerText) || 0;
         var disc  = parseFloat(document.getElementById('cart-discount').value) || 0;
         var gst   = parseFloat(document.getElementById('cart-gst').value) || 0;
-        var total = parseFloat(document.getElementById('cart-total').innerText);
+        var totals = this.computeCartTotals(this.cart, disc, gst);
+        var sub   = totals.subtotal;
+        var total = totals.total;
         var invNo = 'VM' + String(Date.now()).slice(-6);
-        var cartSnapshot = this.cart.map(function(item){ return { name: item.name, qty: item.qty, price: item.price, hsn: item.hsn || '' }; });
+        var cartSnapshot = this.cart.map(function(item){ return { name: item.name, qty: item.qty, price: item.price, hsn: item.hsn || '', category: item.category || '' }; });
 
         api.post('/sales/record', {
             invoiceNo:    invNo,
@@ -927,6 +962,7 @@ var app = {
                 invoiceNo: invNo, customer: name, mobile: mobile, address: address, payMode: payMode,
                 date: new Date().toLocaleDateString('en-IN'),
                 items: cartSnapshot, subtotal: sub, discount: disc, gst: gst, total: total,
+                taxable: totals.taxableAmount, gstAmount: totals.gstAmount,
             };
 
             self.cart = []; self.renderCart(); self.renderPOSProducts();
@@ -958,6 +994,7 @@ var app = {
         var s = this.lastSale, cfg = SHOP_CONFIG;
         var doc = new (window.jspdf.jsPDF)();
         var pageW = 210, marginL = 14, marginR = 196;
+        var RS = 'Rs. '; // jsPDF's built-in fonts don't include the ₹ glyph — using "Rs." avoids the broken/spaced-out digit rendering.
 
         // ── Header: logo + business details (left), TAX INVOICE + invoice# (right) ──
         if (this.logoDataUrl) { try { doc.addImage(this.logoDataUrl, 'PNG', marginL, 10, 18, 18); } catch (e) {} }
@@ -994,15 +1031,17 @@ var app = {
         doc.text('Place of Supply: ' + cfg.placeOfSupply, marginL, afterAddrY);
 
         // ── Item table ──
-        var taxable = s.subtotal - s.discount;
-        var totalTax = taxable * s.gst / 100;
-        var cgstRate = s.gst / 2, sgstRate = s.gst / 2;
+        var taxable  = s.taxable  != null ? s.taxable  : (s.subtotal - s.discount);
+        var totalTax = s.gstAmount != null ? s.gstAmount : (taxable * s.gst / 100);
+        // Blended rate across mixed Mobile(18% incl.)/other(selected %) lines, for the CGST/SGST labels only.
+        var blendedGstPct = taxable > 0 ? (totalTax / taxable * 100) : 0;
+        var cgstRate = blendedGstPct / 2, sgstRate = blendedGstPct / 2;
 
         doc.autoTable({
             startY: afterAddrY + 5,
             head: [['#', 'Item', 'HSN/SAC', 'Rate/Item', 'Qty', 'Amount']],
             body: s.items.map(function(item, i){
-                return [i+1, item.name, item.hsn || '-', '\u20b9' + item.price.toFixed(2), item.qty, '\u20b9' + (item.qty*item.price).toFixed(2)];
+                return [i+1, item.name, item.hsn || '-', RS + item.price.toFixed(2), item.qty, RS + (item.qty*item.price).toFixed(2)];
             }),
             theme: 'grid', headStyles: { fillColor: [30,41,59], fontSize: 8 }, styles: { fontSize: 8 },
             columnStyles: { 0: {cellWidth: 8}, 1: {cellWidth: 62} },
@@ -1010,15 +1049,7 @@ var app = {
 
         var ty = doc.lastAutoTable.finalY + 8;
 
-        // ── Bank details (left) + totals block (right) ──
-        if (cfg.bank && cfg.bank.account) {
-            doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.text('Bank Details:', marginL, ty);
-            doc.setFont(undefined, 'normal');
-            doc.text('Bank: ' + cfg.bank.name, marginL, ty + 5);
-            doc.text('Account #: ' + cfg.bank.account, marginL, ty + 10);
-            doc.text('IFSC: ' + cfg.bank.ifsc + '   Branch: ' + cfg.bank.branch, marginL, ty + 15);
-        }
-
+        // ── Totals block ──
         var ry = ty;
         function totalRow(label, val, bold) {
             doc.setFont(undefined, bold ? 'bold' : 'normal');
@@ -1027,17 +1058,17 @@ var app = {
             doc.text(val, marginR, ry, { align: 'right' });
             ry += bold ? 7 : 5.5;
         }
-        totalRow('Taxable Amount', '\u20b9' + taxable.toFixed(2));
-        if (s.discount > 0) totalRow('Discount', '\u20b9' + s.discount.toFixed(2));
-        totalRow('CGST ' + cgstRate.toFixed(1) + '%', '\u20b9' + (totalTax/2).toFixed(2));
-        totalRow('SGST ' + sgstRate.toFixed(1) + '%', '\u20b9' + (totalTax/2).toFixed(2));
+        totalRow('Taxable Amount', RS + taxable.toFixed(2));
+        if (s.discount > 0) totalRow('Discount', RS + s.discount.toFixed(2));
+        totalRow('CGST ' + cgstRate.toFixed(1) + '%', RS + (totalTax/2).toFixed(2));
+        totalRow('SGST ' + sgstRate.toFixed(1) + '%', RS + (totalTax/2).toFixed(2));
         doc.line(150, ry, marginR, ry); ry += 5;
-        totalRow('Total', '\u20b9' + s.total.toFixed(2), true);
+        totalRow('Total', RS + s.total.toFixed(2), true);
         doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(0,140,0);
         doc.text((s.payMode || 'Paid'), marginR, ry, { align: 'right' });
         doc.setTextColor(0);
 
-        var y2 = Math.max(ty + (cfg.bank && cfg.bank.account ? 22 : 0), ry + 6);
+        var y2 = ry + 6;
         doc.setFontSize(8);
         doc.text('Total Items / Qty : ' + s.items.length + ' / ' + s.items.reduce(function(a,i){return a+i.qty;},0), marginL, y2);
         var wordsLines = doc.splitTextToSize('Total amount (in words): ' + numberToWordsIndian(Math.round(s.total)) + ' Only.', 180);
@@ -1102,8 +1133,8 @@ var app = {
     printInvoice: function() {
         if (!this.lastSale) return;
         var s = this.lastSale;
-        var taxable = s.subtotal - s.discount;
-        var totalTax = taxable * s.gst / 100;
+        var taxable  = s.taxable   != null ? s.taxable   : (s.subtotal - s.discount);
+        var totalTax = s.gstAmount != null ? s.gstAmount : (taxable * s.gst / 100);
         document.getElementById('print-cust-name').innerText    = s.customer;
         document.getElementById('print-cust-address').innerText = s.address || '';
         document.getElementById('print-cust-mobile').innerText  = s.mobile;
@@ -1141,6 +1172,7 @@ var app = {
         document.getElementById('prod-imei-wrap').classList.toggle('hidden', cat !== 'Mobiles');
         // Phones are tracked one-per-IMEI, so Stock is always 1 and hidden
         document.getElementById('prod-stock-wrap').classList.toggle('hidden', cat === 'Mobiles');
+        document.getElementById('prod-sprice-hint').classList.toggle('hidden', cat !== 'Mobiles');
     },
 
     openAddProduct: function() {
