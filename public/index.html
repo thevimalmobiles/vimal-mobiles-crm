@@ -64,10 +64,10 @@
     <div class="login-card text-center">
         <h3 class="mb-4 text-primary"><i class="fas fa-mobile-alt"></i> Vimal Mobiles</h3>
         <p class="text-muted mb-4">CRM &amp; Billing System</p>
-        <div class="mb-3"><input type="text" id="username" class="form-control form-control-lg" placeholder="Username" value="admin"></div>
-        <div class="mb-3"><input type="password" id="password" class="form-control form-control-lg" placeholder="Password" value="admin123"></div>
-        <button class="btn btn-primary btn-lg w-100" onclick="app.login()">Login</button>
-        <div class="mt-3 text-muted" style="font-size:.8rem">Use: admin / admin123 &nbsp;|&nbsp; staff / staff123</div>
+        <div class="mb-3"><input type="text" id="username" class="form-control form-control-lg" placeholder="Username" autocomplete="username"></div>
+        <div class="mb-3"><input type="password" id="password" class="form-control form-control-lg" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')app.login()"></div>
+        <button class="btn btn-primary btn-lg w-100" id="login-btn" onclick="app.login()">Login</button>
+        <div id="login-error" class="text-danger mt-3 hidden" style="font-size:.85rem"></div>
     </div>
 </div>
 
@@ -86,6 +86,7 @@
             <li class="nav-item"><a href="#" onclick="app.showView('repairs',this)"><i class="fas fa-tools"></i> Repairs</a></li>
             <li class="nav-item"><a href="#" onclick="app.showView('customers',this)"><i class="fas fa-users"></i> Customers</a></li>
             <li class="nav-item admin-only"><a href="#" onclick="app.showView('expenses',this)"><i class="fas fa-receipt"></i> Expenses</a></li>
+            <li class="nav-item admin-only"><a href="#" onclick="app.showView('settings',this)"><i class="fas fa-gear"></i> Settings</a></li>
         </ul>
         <div class="p-3"><button class="btn btn-outline-light w-100" onclick="app.logout()"><i class="fas fa-sign-out-alt"></i> Logout</button></div>
     </nav>
@@ -126,8 +127,14 @@
                             <button class="btn btn-sm btn-outline-primary" onclick="app.filterCategory('')">All</button>
                             <button class="btn btn-sm btn-outline-primary" onclick="app.filterCategory('Mobiles')">Mobiles</button>
                             <button class="btn btn-sm btn-outline-primary" onclick="app.filterCategory('Accessories')">Accessories</button>
-                            <button class="btn btn-sm btn-outline-primary" onclick="app.filterCategory('Tempered Glass')">Tempered Glass</button>
                             <button class="btn btn-sm btn-outline-primary" onclick="app.filterCategory('Spares')">Spares</button>
+                            <select class="form-select form-select-sm d-inline-block" style="width:auto" onchange="app.filterSubcategory(this.value)">
+                                <option value="">All Subcategories</option>
+                                <option>Tempered Glass</option><option>Back Cover</option><option>Charger</option>
+                                <option>Cable</option><option>OTG</option><option>Speaker</option>
+                                <option>Airpods/TWS</option><option>Neckband</option><option>Computer Accessory</option>
+                                <option>Other Accessory</option>
+                            </select>
                         </div>
                         <div class="product-grid" id="pos-product-grid"></div>
                     </div>
@@ -169,7 +176,7 @@
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle">
-                            <thead class="table-light"><tr><th>ID</th><th>Name</th><th>Category</th><th>Brand</th><th>Stock</th><th>Buy Price</th><th>Sell Price</th><th>Actions</th></tr></thead>
+                            <thead class="table-light"><tr><th>ID</th><th>Name</th><th>Category</th><th>Model / IMEI</th><th>Supplier</th><th>Stock</th><th>Buy Price</th><th>Sell Price</th><th>Actions</th></tr></thead>
                             <tbody id="inventory-tbody"></tbody>
                         </table>
                     </div>
@@ -240,6 +247,23 @@
                     </div>
                 </div>
             </div>
+
+            <!-- SETTINGS (admin only) -->
+            <div id="view-settings" class="view-section hidden">
+                <div class="data-card" style="max-width:480px">
+                    <h5 class="mb-4">Change a Password</h5>
+                    <div class="mb-3">
+                        <label>Account</label>
+                        <select id="settings-username" class="form-select"></select>
+                    </div>
+                    <div class="mb-3">
+                        <label>New Password</label>
+                        <input type="password" id="settings-new-password" class="form-control" placeholder="At least 4 characters" autocomplete="new-password">
+                    </div>
+                    <div id="settings-msg" class="mb-3 hidden"></div>
+                    <button class="btn btn-primary" onclick="app.savePassword()"><i class="fas fa-key"></i> Update Password</button>
+                </div>
+            </div>
         </div><!-- /p-4 -->
     </div><!-- /content -->
 </div><!-- /wrapper -->
@@ -252,14 +276,38 @@
             <input type="hidden" id="prod-edit-id">
             <div class="mb-3"><label>Product Name</label><input type="text" id="prod-name" class="form-control"></div>
             <div class="row">
-                <div class="col-6 mb-3"><label>Category</label><select id="prod-cat" class="form-select"><option>Mobiles</option><option>Accessories</option><option>Tempered Glass</option><option>Spares</option></select></div>
-                <div class="col-6 mb-3"><label>Brand</label><input type="text" id="prod-brand" class="form-control"></div>
+                <div class="col-6 mb-3"><label>Category</label>
+                    <select id="prod-cat" class="form-select" onchange="app.onCategoryChange()">
+                        <option>Mobiles</option><option>Accessories</option><option>Spares</option>
+                    </select>
+                </div>
+                <div class="col-6 mb-3" id="prod-subcat-wrap">
+                    <label>Subcategory</label>
+                    <select id="prod-subcat" class="form-select">
+                        <option>Tempered Glass</option><option>Back Cover</option><option>Charger</option>
+                        <option>Cable</option><option>OTG</option><option>Speaker</option>
+                        <option>Airpods/TWS</option><option>Neckband</option><option>Computer Accessory</option>
+                        <option>Other Accessory</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-6 mb-3"><label>Brand</label><input type="text" id="prod-brand" class="form-control" placeholder="e.g. OPPO"></div>
+                <div class="col-6 mb-3" id="prod-model-wrap"><label>Model</label><input type="text" id="prod-model" class="form-control" placeholder="e.g. A6c 4G (4+128)"></div>
+            </div>
+            <div class="row">
+                <div class="col-6 mb-3" id="prod-imei-wrap"><label>IMEI Number</label><input type="text" id="prod-imei" class="form-control" placeholder="Unique per phone"></div>
+                <div class="col-6 mb-3"><label>HSN Code</label><input type="text" id="prod-hsn" class="form-control" placeholder="e.g. 85171300"></div>
+            </div>
+            <div class="row">
+                <div class="col-6 mb-3"><label>Batch No.</label><input type="text" id="prod-batch" class="form-control"></div>
+                <div class="col-6 mb-3"><label>Supplier Name</label><input type="text" id="prod-supplier" class="form-control"></div>
             </div>
             <div class="row">
                 <div class="col-6 mb-3"><label>Purchase Price (&#8377;)</label><input type="number" id="prod-pprice" class="form-control" value="0"></div>
                 <div class="col-6 mb-3"><label>Selling Price (&#8377;)</label><input type="number" id="prod-sprice" class="form-control" value="0"></div>
             </div>
-            <div class="mb-3"><label>Stock</label><input type="number" id="prod-stock" class="form-control" value="1"></div>
+            <div class="mb-3" id="prod-stock-wrap"><label>Stock</label><input type="number" id="prod-stock" class="form-control" value="1"></div>
         </div>
         <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="app.saveProduct()">Save Product</button></div>
     </div></div>
@@ -351,7 +399,7 @@
                         </div>
                     </div>
                     <div id="ai-results-table-container" class="hidden">
-                        <table class="table table-sm"><thead class="table-light"><tr><th>Name</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Amount</th><th>Category</th><th></th></tr></thead><tbody id="ai-extracted-tbody"></tbody></table>
+                        <table class="table table-sm"><thead class="table-light"><tr><th>Name</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Amount</th><th>Category</th><th>IMEI / Subcategory</th><th></th></tr></thead><tbody id="ai-extracted-tbody"></tbody></table>
                         <div class="d-flex justify-content-between mt-2 align-items-center">
                             <span class="text-muted small">Items extracted: <strong id="extracted-count">0</strong></span>
                             <button class="btn btn-sm btn-outline-secondary" onclick="app.addBlankRow()"><i class="fas fa-plus"></i> Add Row</button>
@@ -411,11 +459,23 @@ var db = {
 // ═══════════════════════════════════════════════════════════════════════
 var api = {
     _call: function(method, path, body) {
-        var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+        var headers = { 'Content-Type': 'application/json' };
+        var token = localStorage.getItem('vm_token');
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        var opts = { method: method, headers: headers };
         if (body) opts.body = JSON.stringify(body);
-        return fetch('/api' + path, opts).then(function(r) { return r.json(); }).then(function(json) {
-            if (!json.ok) throw new Error(json.error || 'API error');
-            return json.data;
+        return fetch('/api' + path, opts).then(function(r) {
+            return r.json().then(function(json) { return { status: r.status, json: json }; });
+        }).then(function(res) {
+            if (!res.json.ok) {
+                if (res.status === 401 && path !== '/auth/login') {
+                    // Session expired / invalid — force back to login
+                    localStorage.removeItem('vm_token');
+                    app.logout(true);
+                }
+                throw new Error(res.json.error || 'API error');
+            }
+            return res.json.data;
         });
     },
     get:  function(path)       { return this._call('GET', path, null); },
@@ -429,20 +489,27 @@ var app = {
     user: null,
     cart: [],
     currentCategory: '',
+    currentSubcategory: '',
     extractedItems: [],
     extractedHeader: {},
 
-    // ── Init: fetch all data from the Node server ─────────────────────
-    init: function() {
+    // ── Load all CRM data from the Node server (called after login) ───
+    loadFromServer: function() {
         var self = this;
         api.get('/crm-data').then(function(data) {
             if (data.Inventory) {
                 db.products = data.Inventory.map(function(item) {
                     return {
-                        id:       item.id   || '',
-                        name:     item.name || '',
-                        category: item.category || 'Accessories',
-                        brand:    item.brand    || 'Generic',
+                        id:          item.id   || '',
+                        name:        item.name || '',
+                        category:    item.category || 'Accessories',
+                        subcategory: item.subcategory || '',
+                        brand:       item.brand    || 'Generic',
+                        model:       item.model    || '',
+                        hsn:         item.hsn      || '',
+                        imei:        item.imei     || '',
+                        batch:       item.batch    || '',
+                        supplier:    item.supplier || '',
                         price:    parseFloat(item.selling || 0),
                         pprice:   parseFloat(item.cost    || 0),
                         stock:    parseInt(item.stock     || 0),
@@ -517,31 +584,100 @@ var app = {
     },
 
     // ── Auth ──────────────────────────────────────────────────────────
+    // Called once on page load: if a saved token exists, verify it with the
+    // server and go straight into the app; otherwise show the login screen.
+    restoreSession: function() {
+        var self = this;
+        var token = localStorage.getItem('vm_token');
+        if (!token) { this.showLoginView(); return; }
+        api.get('/auth/whoami').then(function(u) {
+            self.user = u;
+            self.enterApp();
+        }).catch(function() {
+            self.showLoginView();
+        });
+    },
+
+    showLoginView: function() {
+        document.getElementById('main-app').classList.add('hidden');
+        document.getElementById('login-view').classList.remove('hidden');
+    },
+
     login: function() {
+        var self = this;
         var u = document.getElementById('username').value.trim();
-        var p = document.getElementById('password').value.trim();
-        if (!((u==='admin'&&p==='admin123')||(u==='staff'&&p==='staff123'))) {
-            this.showAlert('Invalid credentials. Use admin/admin123 or staff/staff123', 'danger'); return;
-        }
-        this.user = { name: u.toUpperCase(), role: u==='admin' ? 'Admin' : 'Staff' };
+        var p = document.getElementById('password').value;
+        var errEl = document.getElementById('login-error');
+        var btn = document.getElementById('login-btn');
+        errEl.classList.add('hidden');
+        if (!u || !p) { errEl.innerText = 'Enter your username and password.'; errEl.classList.remove('hidden'); return; }
+
+        btn.disabled = true; btn.innerText = 'Logging in…';
+        api.post('/auth/login', { username: u, password: p }).then(function(res) {
+            localStorage.setItem('vm_token', res.token);
+            self.user = { username: u, role: res.role, name: res.name };
+            self.enterApp();
+        }).catch(function(err) {
+            errEl.innerText = err.message || 'Login failed';
+            errEl.classList.remove('hidden');
+        }).finally(function() {
+            btn.disabled = false; btn.innerText = 'Login';
+        });
+    },
+
+    enterApp: function() {
         document.getElementById('login-view').classList.add('hidden');
         document.getElementById('main-app').classList.remove('hidden');
         document.getElementById('topbar-username').innerText = this.user.name;
-        document.getElementById('user-role-badge').innerText = this.user.role;
+        document.getElementById('user-role-badge').innerText = this.user.role === 'admin' ? 'Admin' : 'Staff';
         this.applyRolePermissions();
         this.showView('dashboard', null);
+        this.loadFromServer();
     },
 
-    logout: function() {
+    logout: function(silent) {
         this.user = null; this.cart = [];
-        document.getElementById('main-app').classList.add('hidden');
-        document.getElementById('login-view').classList.remove('hidden');
+        localStorage.removeItem('vm_token');
+        this.showLoginView();
         document.getElementById('username').value = '';
         document.getElementById('password').value = '';
+        if (!silent) { /* normal manual logout, nothing else to do */ }
+    },
+
+    // ── Settings: admin can change any user's password ─────────────────
+    loadUsersForSettings: function() {
+        if (this.user.role !== 'admin') return;
+        var sel = document.getElementById('settings-username');
+        sel.innerHTML = '<option>Loading…</option>';
+        api.get('/auth/users').then(function(users) {
+            sel.innerHTML = users.map(function(u) {
+                return '<option value="' + u.username + '">' + u.username + ' (' + u.role + ')</option>';
+            }).join('');
+        }).catch(function(err) {
+            sel.innerHTML = '<option>Failed to load</option>';
+        });
+    },
+
+    savePassword: function() {
+        var self = this;
+        var username = document.getElementById('settings-username').value;
+        var newPassword = document.getElementById('settings-new-password').value;
+        var msg = document.getElementById('settings-msg');
+        if (!username) { return; }
+        if (!newPassword || newPassword.length < 4) {
+            msg.className = 'mb-3 text-danger'; msg.innerText = 'Password must be at least 4 characters.'; msg.classList.remove('hidden');
+            return;
+        }
+        api.post('/auth/change-password', { username: username, newPassword: newPassword }).then(function() {
+            msg.className = 'mb-3 text-success'; msg.innerText = 'Password updated for ' + username + '.'; msg.classList.remove('hidden');
+            document.getElementById('settings-new-password').value = '';
+        }).catch(function(err) {
+            msg.className = 'mb-3 text-danger'; msg.innerText = err.message; msg.classList.remove('hidden');
+        });
     },
 
     applyRolePermissions: function() {
-        var isAdmin = this.user.role === 'Admin';
+        var isAdmin = this.user.role === 'admin';
         document.querySelectorAll('.admin-only').forEach(function(el) { el.classList.toggle('hidden', !isAdmin); });
     },
 
@@ -551,7 +687,8 @@ var app = {
         if (target) target.classList.remove('hidden');
         document.querySelectorAll('#nav-menu li').forEach(function(li) { li.classList.remove('active'); });
         if (linkEl && linkEl.parentElement) linkEl.parentElement.classList.add('active');
-        var titles = {dashboard:'Dashboard',billing:'POS Billing',inventory:'Inventory',finance:'Finance Tracker',repairs:'Repairs',customers:'Customers',expenses:'Expenses'};
+        var titles = {dashboard:'Dashboard',billing:'POS Billing',inventory:'Inventory',finance:'Finance Tracker',repairs:'Repairs',customers:'Customers',expenses:'Expenses',settings:'Settings'};
+        if (viewId === 'settings') app.loadUsersForSettings();
         document.getElementById('topbar-title').innerText = titles[viewId] || viewId;
         if (viewId==='dashboard')  this.loadDashboard();
         if (viewId==='billing')    this.renderPOSProducts();
@@ -595,16 +732,21 @@ var app = {
         var grid = document.getElementById('pos-product-grid');
         var q    = document.getElementById('pos-search').value.toLowerCase();
         var cat  = this.currentCategory;
+        var subcat = this.currentSubcategory;
         grid.innerHTML = '';
         db.products.forEach(function(p) {
             if (cat && p.category !== cat) return;
-            if (q && !p.name.toLowerCase().includes(q)) return;
-            var icon = p.category==='Mobiles'?'fa-mobile-alt':p.category==='Accessories'?'fa-headphones':p.category==='Tempered Glass'?'fa-layer-group':'fa-tools';
-            grid.innerHTML += '<div class="product-item" onclick="app.addToCart(\''+p.id+'\')"><i class="fas '+icon+' fa-2x mb-2 text-secondary"></i><div class="p-name">'+p.name+'</div><div class="p-price">&#8377;'+p.price+'</div><div class="p-stock">Stock: '+p.stock+'</div></div>';
+            if (subcat && p.subcategory !== subcat) return;
+            if (p.stock <= 0) return; // sold out / out of stock
+            if (q && !((p.name+' '+(p.model||'')).toLowerCase().includes(q))) return;
+            var icon = p.category==='Mobiles' ? 'fa-mobile-alt' : p.category==='Spares' ? 'fa-tools' : 'fa-headphones';
+            var label = p.category==='Mobiles' && p.model ? (p.brand+' '+p.model) : p.name;
+            grid.innerHTML += '<div class="product-item" onclick="app.addToCart(\''+p.id+'\')"><i class="fas '+icon+' fa-2x mb-2 text-secondary"></i><div class="p-name">'+label+'</div><div class="p-price">&#8377;'+p.price+'</div><div class="p-stock">Stock: '+p.stock+'</div></div>';
         });
     },
 
-    filterCategory: function(cat) { this.currentCategory = cat; this.renderPOSProducts(); },
+    filterCategory:    function(cat) { this.currentCategory = cat; this.renderPOSProducts(); },
+    filterSubcategory: function(sc)  { this.currentSubcategory = sc; this.renderPOSProducts(); },
 
     addToCart: function(id) {
         var p = db.products.find(function(x){ return x.id === id; });
@@ -696,19 +838,38 @@ var app = {
         tbody.innerHTML = '';
         db.products.forEach(function(p) {
             var badge = p.stock<=0 ? '<span class="badge bg-danger">Out</span>' : p.stock<=5 ? '<span class="badge bg-warning text-dark">'+p.stock+' Low</span>' : '<span class="badge bg-success">'+p.stock+'</span>';
-            tbody.innerHTML += '<tr><td><code>'+p.id+'</code></td><td><strong>'+p.name+'</strong></td><td><span class="badge bg-secondary">'+p.category+'</span></td><td>'+(p.brand||'&mdash;')+'</td><td>'+badge+'</td><td>&#8377;'+(p.pprice||0)+'</td><td>&#8377;'+(p.price||0)+'</td><td><button class="btn btn-sm btn-outline-primary me-1" onclick="app.editProduct(\''+p.id+'\')"><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-outline-danger" onclick="app.deleteProduct(\''+p.id+'\')"><i class="fas fa-trash"></i></button></td></tr>';
+            var catBadge = '<span class="badge bg-secondary">'+p.category+(p.subcategory?' / '+p.subcategory:'')+'</span>';
+            var modelImei = p.category==='Mobiles' ? ((p.model||'&mdash;')+'<br><small class="text-muted">'+(p.imei||'')+'</small>') : (p.model||'&mdash;');
+            tbody.innerHTML += '<tr><td><code>'+p.id+'</code></td><td><strong>'+p.name+'</strong></td><td>'+catBadge+'</td><td>'+modelImei+'</td><td>'+(p.supplier||'&mdash;')+'</td><td>'+badge+'</td><td>&#8377;'+(p.pprice||0)+'</td><td>&#8377;'+(p.price||0)+'</td><td><button class="btn btn-sm btn-outline-primary me-1" onclick="app.editProduct(\''+p.id+'\')"><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-outline-danger" onclick="app.deleteProduct(\''+p.id+'\')"><i class="fas fa-trash"></i></button></td></tr>';
         });
+    },
+
+    // Show/hide fields depending on whether Category = Mobiles, Accessories, or Spares
+    onCategoryChange: function() {
+        var cat = document.getElementById('prod-cat').value;
+        document.getElementById('prod-subcat-wrap').classList.toggle('hidden', cat !== 'Accessories');
+        document.getElementById('prod-model-wrap').classList.toggle('hidden', cat !== 'Mobiles');
+        document.getElementById('prod-imei-wrap').classList.toggle('hidden', cat !== 'Mobiles');
+        // Phones are tracked one-per-IMEI, so Stock is always 1 and hidden
+        document.getElementById('prod-stock-wrap').classList.toggle('hidden', cat === 'Mobiles');
     },
 
     openAddProduct: function() {
         document.getElementById('prod-edit-id').value = '';
         document.getElementById('prod-name').value    = '';
         document.getElementById('prod-cat').value     = 'Mobiles';
+        document.getElementById('prod-subcat').value  = 'Tempered Glass';
         document.getElementById('prod-brand').value   = '';
+        document.getElementById('prod-model').value   = '';
+        document.getElementById('prod-imei').value    = '';
+        document.getElementById('prod-hsn').value     = '';
+        document.getElementById('prod-batch').value   = '';
+        document.getElementById('prod-supplier').value = '';
         document.getElementById('prod-pprice').value  = 0;
         document.getElementById('prod-sprice').value  = 0;
         document.getElementById('prod-stock').value   = 1;
         document.getElementById('productModalTitle').innerText = 'Add Product';
+        this.onCategoryChange();
         this.openModal('productModal');
     },
 
@@ -718,11 +879,18 @@ var app = {
         document.getElementById('prod-edit-id').value = id;
         document.getElementById('prod-name').value    = p.name;
         document.getElementById('prod-cat').value     = p.category;
+        document.getElementById('prod-subcat').value  = p.subcategory || 'Tempered Glass';
         document.getElementById('prod-brand').value   = p.brand || '';
+        document.getElementById('prod-model').value   = p.model || '';
+        document.getElementById('prod-imei').value    = p.imei  || '';
+        document.getElementById('prod-hsn').value     = p.hsn   || '';
+        document.getElementById('prod-batch').value   = p.batch || '';
+        document.getElementById('prod-supplier').value = p.supplier || '';
         document.getElementById('prod-pprice').value  = p.pprice || 0;
         document.getElementById('prod-sprice').value  = p.price  || 0;
         document.getElementById('prod-stock').value   = p.stock  || 0;
         document.getElementById('productModalTitle').innerText = 'Edit Product';
+        this.onCategoryChange();
         this.openModal('productModal');
     },
 
@@ -735,16 +903,29 @@ var app = {
         var sprice = parseFloat(document.getElementById('prod-sprice').value) || 0;
         var stock  = parseInt(document.getElementById('prod-stock').value)    || 0;
         var cat    = document.getElementById('prod-cat').value;
+        var subcat = cat === 'Accessories' ? document.getElementById('prod-subcat').value : '';
         var brand  = document.getElementById('prod-brand').value.trim() || 'Generic';
+        var model  = document.getElementById('prod-model').value.trim();
+        var imei   = document.getElementById('prod-imei').value.trim();
+        var hsn    = document.getElementById('prod-hsn').value.trim();
+        var batch  = document.getElementById('prod-batch').value.trim();
+        var supplier = document.getElementById('prod-supplier').value.trim();
 
-        api.post('/inventory/save', { id: editId || null, name, category: cat, brand, cost: pprice, selling: sprice, stock })
+        if (cat === 'Mobiles' && !editId && !imei) {
+            this.showAlert('IMEI Number is required for Mobiles', 'warning'); return;
+        }
+
+        api.post('/inventory/save', {
+            id: editId || null, name, category: cat, subcategory: subcat, brand, model, imei, hsn, batch, supplier,
+            cost: pprice, selling: sprice, stock,
+        })
         .then(function(result) {
             var finalId = result.id;
             if (editId) {
                 var p = db.products.find(function(x){ return x.id === editId; });
-                if (p) { p.name = name; p.category = cat; p.brand = brand; p.pprice = pprice; p.price = sprice; p.stock = stock; }
+                if (p) { p.name=name; p.category=cat; p.subcategory=subcat; p.brand=brand; p.model=model; p.imei=imei; p.hsn=hsn; p.batch=batch; p.supplier=supplier; p.pprice=pprice; p.price=sprice; p.stock=(cat==='Mobiles'?1:stock); }
             } else {
-                db.products.push({ id: finalId, name, category: cat, brand, pprice, price: sprice, stock });
+                db.products.push({ id: finalId, name, category: cat, subcategory: subcat, brand, model, imei, hsn, batch, supplier, pprice, price: sprice, stock: (cat==='Mobiles'?1:stock) });
             }
             self.renderInventory(); self.renderPOSProducts();
             self.showAlert('Product saved!', 'success');
@@ -1013,6 +1194,34 @@ var app = {
         var items = []; var inTable = false;
         var tableStartRx = /(?:item|description|product|particulars|s\.?no|sno|sl\.?\s*no)/i;
         var tableEndRx   = /(?:total|subtotal|gst|cgst|sgst|igst|amount\s*in\s*words|grand\s*total|tax\s*detail)/i;
+        // Best-effort category + subcategory detector shared by both extraction passes
+        function detectCat(nl) {
+            if (/phone|mobile|iphone|samsung|redmi|realme|oppo|vivo|poco|oneplus|nokia|infinix|tecno|motorola|pixel/.test(nl))
+                return { category: 'Mobiles', subcategory: '' };
+            if (/glass|tempered|screen\s*guard|protector/.test(nl))
+                return { category: 'Accessories', subcategory: 'Tempered Glass' };
+            if (/back\s*cover|case\b/.test(nl))
+                return { category: 'Accessories', subcategory: 'Back Cover' };
+            if (/charger|adapter/.test(nl))
+                return { category: 'Accessories', subcategory: 'Charger' };
+            if (/\bcable\b|usb\s*cord|data\s*cable/.test(nl))
+                return { category: 'Accessories', subcategory: 'Cable' };
+            if (/\botg\b/.test(nl))
+                return { category: 'Accessories', subcategory: 'OTG' };
+            if (/neckband/.test(nl))
+                return { category: 'Accessories', subcategory: 'Neckband' };
+            if (/airpod|\btws\b|earbud/.test(nl))
+                return { category: 'Accessories', subcategory: 'Airpods/TWS' };
+            if (/speaker/.test(nl))
+                return { category: 'Accessories', subcategory: 'Speaker' };
+            if (/mouse|keyboard|pendrive|usb\s*hub|laptop\s*bag/.test(nl))
+                return { category: 'Accessories', subcategory: 'Computer Accessory' };
+            if (/battery|display|touch|panel|flex|camera|board|charging\s*port/.test(nl))
+                return { category: 'Spares', subcategory: '' };
+            return { category: 'Accessories', subcategory: 'Other Accessory' };
+        }
+        // A 15-digit run is almost always an IMEI on a phone-purchase invoice
+        function detectImei(line) { var m = line.match(/\b\d{15}\b/); return m ? m[0] : ''; }
         lines.forEach(function(line) {
             if (tableStartRx.test(line) && !inTable) { inTable=true; return; }
             if (inTable && tableEndRx.test(line)) { inTable=false; return; }
@@ -1027,12 +1236,10 @@ var app = {
             else if (cleanNums.length===2){ rate=cleanNums[0]; amount=cleanNums[1]; qty=rate>0?Math.round(amount/rate)||1:1; }
             else { amount=cleanNums[0]; rate=amount; qty=1; }
             if (qty<1||qty>10000) qty=1; if (rate<=0&&amount>0) rate=amount/qty;
-            var nl=name.toLowerCase(), cat='Accessories';
-            if (/phone|mobile|iphone|samsung|redmi|realme|oppo|vivo|poco|oneplus|nokia|infinix|tecno|motorola|pixel/.test(nl)) cat='Mobiles';
-            else if (/glass|tempered|screen\s*guard|protector/.test(nl)) cat='Tempered Glass';
-            else if (/battery|display|touch|panel|flex|speaker|mic|camera|board|charging\s*port|back\s*cover\s*glass/.test(nl)) cat='Spares';
+            var nl=name.toLowerCase(), det=detectCat(nl);
             var hsnMatch=line.match(/([0-9]{4,8})/); var hsn=hsnMatch?hsnMatch[1]:'';
-            items.push(self._flagRow({name:name.slice(0,80),hsn,qty,price:rate,amount,category:cat}));
+            var imei = det.category==='Mobiles' ? detectImei(line) : '';
+            items.push(self._flagRow({name:name.slice(0,80),hsn,qty,price:rate,amount,category:det.category,subcategory:det.subcategory,imei:imei}));
         });
         if (items.length===0) {
             lines.forEach(function(line) {
@@ -1043,11 +1250,9 @@ var app = {
                 if (name.length<3||/total|gst|tax|amount|subtotal/i.test(name)) return;
                 var rate=cleanNums[cleanNums.length-1], qty=cleanNums.length>1?cleanNums[cleanNums.length-2]:1;
                 if (qty>999||qty<1) qty=1;
-                var nl=name.toLowerCase(), cat='Accessories';
-                if (/phone|mobile|iphone|samsung|redmi|realme|oppo|vivo|poco|oneplus/.test(nl)) cat='Mobiles';
-                else if (/glass|tempered|screen\s*guard/.test(nl)) cat='Tempered Glass';
-                else if (/battery|display|touch|panel|flex/.test(nl)) cat='Spares';
-                items.push(self._flagRow({name:name.slice(0,80),hsn:'',qty,price:rate,amount:qty*rate,category:cat}));
+                var nl=name.toLowerCase(), det=detectCat(nl);
+                var imei = det.category==='Mobiles' ? detectImei(line) : '';
+                items.push(self._flagRow({name:name.slice(0,80),hsn:'',qty,price:rate,amount:qty*rate,category:det.category,subcategory:det.subcategory,imei:imei}));
             });
         }
         self.extractedItems = items;
@@ -1080,20 +1285,34 @@ var app = {
         var tbody = document.getElementById('ai-extracted-tbody');
         tbody.innerHTML = '';
         var self = this; var flaggedCount = 0;
+        var subcatOptions = ['Tempered Glass','Back Cover','Charger','Cable','OTG','Speaker','Airpods/TWS','Neckband','Computer Accessory','Other Accessory'];
         this.extractedItems.forEach(function(item, i) {
             var rowClass = item.suspicious ? ' class="table-warning"' : '';
             var flagIcon = item.suspicious ? '<i class="fas fa-triangle-exclamation text-warning me-1" title="'+(item.flagReason||'Please verify').replace(/"/g,'&quot;')+'"></i>' : '';
             if (item.suspicious) flaggedCount++;
+
+            var lastCell;
+            if (item.category === 'Mobiles') {
+                lastCell = '<input type="text" class="form-control form-control-sm" placeholder="IMEI (required)" value="'+(item.imei||'').replace(/"/g,'&quot;')+'" onchange="app.extractedItems['+i+'].imei=this.value">';
+            } else if (item.category === 'Accessories') {
+                lastCell = '<select class="form-select form-select-sm" onchange="app.extractedItems['+i+'].subcategory=this.value">' +
+                    subcatOptions.map(function(sc){ return '<option'+(item.subcategory===sc?' selected':'')+'>'+sc+'</option>'; }).join('') +
+                    '</select>';
+            } else {
+                lastCell = '&mdash;';
+            }
+
             tbody.innerHTML += '<tr'+rowClass+'><td>'+flagIcon+'<input type="text" class="form-control form-control-sm d-inline-block" style="width:calc(100% - 22px)" value="'+item.name.replace(/"/g,'&quot;')+'" onchange="app.extractedItems['+i+'].name=this.value"></td>'+
+                '<td><input type="text" class="form-control form-control-sm" value="'+(item.hsn||'')+'" onchange="app.extractedItems['+i+'].hsn=this.value"></td>'+
                 '<td><input type="number" class="form-control form-control-sm" value="'+item.qty+'" min="1" onchange="app.extractedItems['+i+'].qty=parseInt(this.value)||1"></td>'+
                 '<td><input type="number" class="form-control form-control-sm" value="'+item.price+'" min="0" onchange="app.extractedItems['+i+'].price=parseFloat(this.value)||0"></td>'+
                 '<td>'+item.amount+'</td>'+
-                '<td><select class="form-select form-select-sm" onchange="app.extractedItems['+i+'].category=this.value">'+
+                '<td><select class="form-select form-select-sm" onchange="app.extractedItems['+i+'].category=this.value; app.renderExtracted();">'+
                 '<option'+(item.category==='Mobiles'?' selected':'')+'>Mobiles</option>'+
                 '<option'+(item.category==='Accessories'?' selected':'')+'>Accessories</option>'+
-                '<option'+(item.category==='Tempered Glass'?' selected':'')+'>Tempered Glass</option>'+
                 '<option'+(item.category==='Spares'?' selected':'')+'>Spares</option>'+
                 '</select></td>'+
+                '<td>'+lastCell+'</td>'+
                 '<td><button class="btn btn-sm text-danger" onclick="app.removeExtractedRow('+i+')"><i class="fas fa-trash"></i></button></td></tr>';
         });
         document.getElementById('extracted-count').innerText = this.extractedItems.length;
@@ -1109,36 +1328,64 @@ var app = {
     },
 
     removeExtractedRow: function(i) { this.extractedItems.splice(i,1); this.renderExtracted(); },
-    addBlankRow: function()         { this.extractedItems.push({name:'',qty:1,price:0,category:'Accessories'}); this.renderExtracted(); },
+    addBlankRow: function()         { this.extractedItems.push({name:'',qty:1,price:0,category:'Accessories',subcategory:'Other Accessory',hsn:'',imei:''}); this.renderExtracted(); },
 
     commitIngestion: function() {
         var self = this;
         if (!this.extractedItems.length) { this.showAlert('No items to add', 'warning'); return; }
         var header      = this.extractedHeader || {};
         var invoiceDate = header.date || new Date().toISOString().slice(0,10);
+        var supplier    = header.supplier || '';
+        var invoiceNo   = header.invoiceNo || '';
         var savePromises = [];
+        var skipped = 0;
 
         this.extractedItems.forEach(function(item) {
             if (!item.name.trim()) return;
-            var match = db.products.find(function(p){ return p.name.toLowerCase().trim()===item.name.toLowerCase().trim(); });
+
+            if (item.category === 'Mobiles') {
+                // One row per physical phone — IMEI is mandatory & unique
+                if (!item.imei || !item.imei.trim()) { skipped++; return; }
+                var newPhone = {
+                    id: item.imei.trim(), name: item.name.trim(), category: 'Mobiles', subcategory: '',
+                    brand: 'Generic', model: item.name.trim(), hsn: item.hsn || '', imei: item.imei.trim(), batch: '',
+                    supplier: supplier,
+                    pprice: parseFloat(item.price) || 0,
+                    price:  Math.round((parseFloat(item.price) || 0) * 1.1),
+                    stock: 1,
+                };
+                db.products.push(newPhone);
+                savePromises.push(api.post('/inventory/save', {
+                    id: newPhone.id, name: newPhone.name, category: 'Mobiles', model: newPhone.model,
+                    hsn: newPhone.hsn, imei: newPhone.imei, supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate,
+                    cost: newPhone.pprice, selling: newPhone.price, stock: 1,
+                }));
+                return;
+            }
+
+            // Accessories / Spares — stock quantity, merge into existing product by name if found
+            var match = db.products.find(function(p){ return p.name.toLowerCase().trim()===item.name.toLowerCase().trim() && p.category !== 'Mobiles'; });
             if (match) {
                 match.stock  += parseInt(item.qty) || 1;
                 match.pprice  = parseFloat(item.price) || 0;
                 savePromises.push(api.post('/inventory/save', {
-                    id: match.id, name: match.name, category: match.category,
+                    id: match.id, name: match.name, category: match.category, subcategory: match.subcategory,
+                    hsn: item.hsn || match.hsn, supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate,
                     cost: match.pprice, selling: match.price, stock: match.stock,
                 }));
             } else {
                 var newProd = {
                     id: 'P'+String(Date.now()).slice(-6)+Math.floor(Math.random()*99),
-                    name: item.name.trim(), category: item.category || 'Accessories', brand: 'Generic',
+                    name: item.name.trim(), category: item.category || 'Accessories', subcategory: item.subcategory || '',
+                    brand: 'Generic', hsn: item.hsn || '', supplier: supplier,
                     pprice: parseFloat(item.price) || 0,
                     price:  Math.round((parseFloat(item.price)||0) * 1.25),
                     stock:  parseInt(item.qty) || 1,
                 };
                 db.products.push(newProd);
                 savePromises.push(api.post('/inventory/save', {
-                    id: newProd.id, name: newProd.name, category: newProd.category,
+                    id: newProd.id, name: newProd.name, category: newProd.category, subcategory: newProd.subcategory,
+                    hsn: newProd.hsn, supplier: supplier, invoiceNo: invoiceNo, invoiceDate: invoiceDate,
                     cost: newProd.pprice, selling: newProd.price, stock: newProd.stock,
                 }));
             }
@@ -1148,7 +1395,9 @@ var app = {
             bootstrap.Modal.getInstance(document.getElementById('uploadInvoiceModal')).hide();
             self.clearInvoiceUpload();
             self.renderInventory();
-            self.showAlert('Ingestion complete! ' + savePromises.length + ' item(s) saved to sheet.', 'success');
+            var msg = 'Ingestion complete! ' + savePromises.length + ' item(s) saved to sheet.';
+            if (skipped > 0) msg += ' ' + skipped + ' phone row(s) skipped — missing IMEI.';
+            self.showAlert(msg, skipped > 0 ? 'warning' : 'success');
         }).catch(function(err) {
             self.showAlert('Some items failed to save: ' + err.message, 'danger');
         });
@@ -1161,7 +1410,7 @@ var app = {
 };
 
 // ── Boot ──────────────────────────────────────────────────────────────
-app.init();
+app.restoreSession();
 
 if (typeof google !== 'undefined' && google.charts) {
     try {
