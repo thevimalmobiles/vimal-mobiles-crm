@@ -3,11 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vimal Mobiles CRM</title>
+    <title> The Vimal Mobiles CRM</title>
     <link href="https://unpkg.com/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
     <script src="https://unpkg.com/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://www.gstatic.com/charts/loader.js"></script>
+    <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/jspdf-autotable@3.8.1/dist/jspdf.plugin.autotable.js"></script>
     <style>
         :root{--primary:#1e293b;--accent:#3b82f6;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;--bg:#f8fafc;--text:#0f172a}
         body{font-family:'Segoe UI',sans-serif;background:var(--bg);overflow-x:hidden}
@@ -75,7 +77,7 @@
 <div class="wrapper hidden" id="main-app">
     <nav id="sidebar">
         <div class="sidebar-header">
-            <h4><i class="fas fa-mobile-screen"></i> Vimal Mobiles</h4>
+            <h4><i class="fas fa-mobile-screen"></i> The Vimal Mobiles</h4>
             <small id="user-role-badge" class="badge bg-primary mt-2">Admin</small>
         </div>
         <ul id="nav-menu">
@@ -427,6 +429,29 @@
     <div style="text-align:center;margin-top:40px;font-size:12px;color:#555"><p>Thank you for shopping at Vimal Mobiles!</p></div>
 </div>
 
+<!-- SALE COMPLETE MODAL -->
+<div class="modal fade" id="saleCompleteModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog"><div class="modal-content">
+        <div class="modal-header bg-success text-white">
+            <h5 class="modal-title m-0"><i class="fas fa-circle-check me-2"></i> Sale Complete</h5>
+        </div>
+        <div class="modal-body text-center">
+            <p class="mb-1 text-muted">Invoice</p>
+            <h4 id="sc-invoice-no" class="mb-3"></h4>
+            <h2 class="text-success mb-4">&#8377;<span id="sc-total"></span></h2>
+            <div class="d-grid gap-2">
+                <button class="btn btn-primary" onclick="app.downloadInvoicePDF()"><i class="fas fa-file-pdf"></i> Download Invoice PDF</button>
+                <button class="btn btn-success" onclick="app.shareInvoiceWhatsApp()"><i class="fab fa-whatsapp"></i> Share to WhatsApp</button>
+                <button class="btn btn-outline-secondary" onclick="app.printInvoice()"><i class="fas fa-print"></i> Print Invoice</button>
+            </div>
+            <div id="sc-share-note" class="small text-muted mt-3 hidden"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">New Sale</button>
+        </div>
+    </div></div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════════════════════
 // ERROR HANDLER
@@ -490,6 +515,7 @@ var app = {
     cart: [],
     currentCategory: '',
     currentSubcategory: '',
+    lastSale: null,
     extractedItems: [],
     extractedHeader: {},
 
@@ -798,8 +824,12 @@ var app = {
         var mobile = document.getElementById('cart-customer-mobile').value.trim();
         var name   = document.getElementById('cart-customer-name').value.trim() || 'Walk-in';
         if (!mobile) { this.showAlert('Please enter customer mobile', 'warning'); return; }
-        var total  = parseFloat(document.getElementById('cart-total').innerText);
-        var invNo  = 'VM' + String(Date.now()).slice(-6);
+        var sub   = parseFloat(document.getElementById('cart-subtotal').innerText) || 0;
+        var disc  = parseFloat(document.getElementById('cart-discount').value) || 0;
+        var gst   = parseFloat(document.getElementById('cart-gst').value) || 0;
+        var total = parseFloat(document.getElementById('cart-total').innerText);
+        var invNo = 'VM' + String(Date.now()).slice(-6);
+        var cartSnapshot = this.cart.map(function(item){ return { name: item.name, qty: item.qty, price: item.price }; });
 
         api.post('/sales/record', {
             invoiceNo:    invNo,
@@ -818,18 +848,106 @@ var app = {
             if (cx) cx.total += total;
             else db.customers.push({ name: name, mobile: mobile, total: total, pending: 0 });
 
+            // Snapshot everything the invoice (PDF/print/WhatsApp) needs —
+            // the cart gets cleared right after this, so nothing here can
+            // rely on live cart/form state.
+            self.lastSale = {
+                invoiceNo: invNo, customer: name, mobile: mobile, date: new Date().toLocaleDateString('en-IN'),
+                items: cartSnapshot, subtotal: sub, discount: disc, gst: gst, total: total,
+            };
+
             self.cart = []; self.renderCart(); self.renderPOSProducts();
             document.getElementById('cart-customer-mobile').value = '';
             document.getElementById('cart-customer-name').value   = '';
-            self.showAlert('Sale complete! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2), 'success');
 
-            var msg     = 'Hello ' + name + ', thank you for shopping at Vimal Mobiles! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2);
-            var cleaned = mobile.replace(/\D/g, '');
-            if (cleaned.length === 10) cleaned = '91' + cleaned;
-            window.open('https://wa.me/' + cleaned + '?text=' + encodeURIComponent(msg), '_blank');
+            document.getElementById('sc-invoice-no').innerText = invNo;
+            document.getElementById('sc-total').innerText      = total.toFixed(2);
+            document.getElementById('sc-share-note').classList.add('hidden');
+            self.openModal('saleCompleteModal');
         }).catch(function(err) {
             self.showAlert('Sale failed: ' + err.message, 'danger');
         });
+    },
+
+    // ── Invoice PDF / Print / WhatsApp (uses the last completed sale) ──
+    _buildInvoicePDF: function() {
+        var s = this.lastSale;
+        var doc = new (window.jspdf.jsPDF)();
+        doc.setFontSize(18); doc.text('VIMAL MOBILES', 105, 18, { align: 'center' });
+        doc.setFontSize(10); doc.text('Tambaram, Chennai | Ph: 9876543210', 105, 25, { align: 'center' });
+        doc.setFontSize(13); doc.text('TAX INVOICE', 105, 33, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text('Customer: ' + s.customer, 14, 45);
+        doc.text('Mobile: ' + s.mobile, 14, 51);
+        doc.text('Invoice: ' + s.invoiceNo, 196, 45, { align: 'right' });
+        doc.text('Date: ' + s.date, 196, 51, { align: 'right' });
+
+        doc.autoTable({
+            startY: 58,
+            head: [['Item', 'Qty', 'Price (₹)', 'Total (₹)']],
+            body: s.items.map(function(i){ return [i.name, i.qty, i.price.toFixed(2), (i.qty*i.price).toFixed(2)]; }),
+            theme: 'grid', headStyles: { fillColor: [30,41,59] },
+        });
+
+        var y = doc.lastAutoTable.finalY + 10;
+        doc.text('Subtotal: Rs. ' + s.subtotal.toFixed(2), 196, y, { align: 'right' }); y += 6;
+        doc.text('Discount: Rs. ' + s.discount.toFixed(2), 196, y, { align: 'right' }); y += 6;
+        doc.text('GST: ' + s.gst + '%', 196, y, { align: 'right' }); y += 8;
+        doc.setFontSize(13); doc.setFont(undefined, 'bold');
+        doc.text('Grand Total: Rs. ' + s.total.toFixed(2), 196, y, { align: 'right' });
+        doc.setFontSize(9); doc.setFont(undefined, 'normal');
+        doc.text('Thank you for shopping at Vimal Mobiles!', 105, y + 15, { align: 'center' });
+        return doc;
+    },
+
+    downloadInvoicePDF: function() {
+        if (!this.lastSale) return;
+        this._buildInvoicePDF().save('Invoice-' + this.lastSale.invoiceNo + '.pdf');
+    },
+
+    shareInvoiceWhatsApp: function() {
+        var self = this;
+        if (!this.lastSale) return;
+        var s = this.lastSale;
+        var doc = this._buildInvoicePDF();
+        var cleaned = s.mobile.replace(/\D/g, '');
+        if (cleaned.length === 10) cleaned = '91' + cleaned;
+        var msg = 'Hello ' + s.customer + ', thank you for shopping at Vimal Mobiles! Invoice: ' + s.invoiceNo + ' | Total: Rs. ' + s.total.toFixed(2);
+        var note = document.getElementById('sc-share-note');
+
+        // On phones with the Web Share API (file support), this hands the
+        // actual PDF straight to the WhatsApp share sheet.
+        var blob = doc.output('blob');
+        var file = new File([blob], 'Invoice-' + s.invoiceNo + '.pdf', { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            navigator.share({ files: [file], title: 'Invoice ' + s.invoiceNo, text: msg }).catch(function() {});
+            return;
+        }
+
+        // Desktop / unsupported browsers: WhatsApp Web can't accept a file
+        // via a link, so download the PDF and open a prefilled chat —
+        // the person attaches the just-downloaded file manually.
+        doc.save('Invoice-' + s.invoiceNo + '.pdf');
+        window.open('https://wa.me/' + cleaned + '?text=' + encodeURIComponent(msg), '_blank');
+        note.innerText = 'PDF downloaded — attach it in the WhatsApp chat that just opened.';
+        note.classList.remove('hidden');
+    },
+
+    printInvoice: function() {
+        if (!this.lastSale) return;
+        var s = this.lastSale;
+        document.getElementById('print-cust-name').innerText   = s.customer;
+        document.getElementById('print-cust-mobile').innerText = s.mobile;
+        document.getElementById('print-inv-no').innerText      = s.invoiceNo;
+        document.getElementById('print-date').innerText        = s.date;
+        document.getElementById('print-subtotal').innerText    = s.subtotal.toFixed(2);
+        document.getElementById('print-discount').innerText    = s.discount.toFixed(2);
+        document.getElementById('print-gst').innerText         = s.gst + '%';
+        document.getElementById('print-total').innerText       = s.total.toFixed(2);
+        document.getElementById('print-items').innerHTML = s.items.map(function(i) {
+            return '<tr><td style="padding:5px">'+i.name+'</td><td style="text-align:center;padding:5px">'+i.qty+'</td><td style="text-align:right;padding:5px">&#8377;'+i.price.toFixed(2)+'</td><td style="text-align:right;padding:5px">&#8377;'+(i.qty*i.price).toFixed(2)+'</td></tr>';
+        }).join('');
+        window.print();
     },
 
     // ── Inventory ─────────────────────────────────────────────────────
