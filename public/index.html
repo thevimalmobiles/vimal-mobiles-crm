@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title> The Vimal Mobiles CRM</title>
+    <title>Vimal Mobiles CRM</title>
     <link href="https://unpkg.com/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
     <script src="https://unpkg.com/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -64,7 +64,8 @@
 <!-- LOGIN -->
 <div id="login-view">
     <div class="login-card text-center">
-        <h3 class="mb-4 text-primary"><i class="fas fa-mobile-alt"></i> Vimal Mobiles</h3>
+        <img src="logo.png" alt="Vimal Mobiles" style="width:88px;height:88px;border-radius:50%;object-fit:cover;margin-bottom:12px">
+        <h3 class="mb-4 text-primary">Vimal Mobiles</h3>
         <p class="text-muted mb-4">CRM &amp; Billing System</p>
         <div class="mb-3"><input type="text" id="username" class="form-control form-control-lg" placeholder="Username" autocomplete="username"></div>
         <div class="mb-3"><input type="password" id="password" class="form-control form-control-lg" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')app.login()"></div>
@@ -77,7 +78,8 @@
 <div class="wrapper hidden" id="main-app">
     <nav id="sidebar">
         <div class="sidebar-header">
-            <h4><i class="fas fa-mobile-screen"></i> The Vimal Mobiles</h4>
+            <img src="logo.png" alt="Vimal Mobiles" style="width:52px;height:52px;border-radius:50%;object-fit:cover;margin-bottom:6px">
+            <h4>Vimal Mobiles</h4>
             <small id="user-role-badge" class="badge bg-primary mt-2">Admin</small>
         </div>
         <ul id="nav-menu">
@@ -143,7 +145,8 @@
                     <div class="pos-cart">
                         <div class="mb-3">
                             <input type="text" class="form-control mb-2" id="cart-customer-mobile" placeholder="Customer Mobile">
-                            <input type="text" class="form-control" id="cart-customer-name" placeholder="Customer Name">
+                            <input type="text" class="form-control mb-2" id="cart-customer-name" placeholder="Customer Name">
+                            <input type="text" class="form-control" id="cart-customer-address" placeholder="Customer Address (optional)">
                         </div>
                         <div class="cart-table-container">
                             <table class="table table-sm"><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th></th></tr></thead><tbody id="cart-tbody"></tbody></table>
@@ -419,13 +422,31 @@
 
 <!-- PRINT INVOICE AREA -->
 <div id="print-invoice-area">
-    <div style="text-align:center;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:20px"><h2>VIMAL MOBILES</h2><p style="margin:0">Tambaram, Chennai | Ph: 9876543210</p><h3>TAX INVOICE</h3></div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:20px">
-        <div><strong>Customer:</strong> <span id="print-cust-name"></span><br><strong>Mobile:</strong> <span id="print-cust-mobile"></span></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:15px">
+        <div style="display:flex;align-items:center;gap:10px">
+            <img src="logo.png" style="width:50px;height:50px;border-radius:50%;object-fit:cover">
+            <div>
+                <h3 style="margin:0">THE VIMAL MOBILES</h3>
+                <p style="margin:0;font-size:12px">GSTIN: 33CGFPD7938D1ZL | Mobile: +91 8778470847</p>
+                <p style="margin:0;font-size:12px">Email: Thevimalmobiles@gmail.com</p>
+            </div>
+        </div>
+        <div style="text-align:right"><h3 style="margin:0">TAX INVOICE</h3><p style="margin:0;font-size:11px">Original for Recipient</p></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:15px">
+        <div><strong>Bill To:</strong> <span id="print-cust-name"></span><br><span id="print-cust-address"></span><br><strong>Mobile:</strong> <span id="print-cust-mobile"></span></div>
         <div style="text-align:right"><strong>Invoice:</strong> <span id="print-inv-no"></span><br><strong>Date:</strong> <span id="print-date"></span></div>
     </div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:20px"><thead><tr style="border-bottom:1px solid #000"><th style="text-align:left;padding:5px">Item</th><th style="text-align:center;padding:5px">Qty</th><th style="text-align:right;padding:5px">Price</th><th style="text-align:right;padding:5px">Total</th></tr></thead><tbody id="print-items"></tbody></table>
-    <div style="text-align:right"><p>Subtotal: &#8377;<span id="print-subtotal"></span></p><p>Discount: &#8377;<span id="print-discount"></span></p><p>GST: <span id="print-gst"></span></p><h3 style="border-top:1px dashed #000;padding-top:10px">Grand Total: &#8377;<span id="print-total"></span></h3></div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px"><thead><tr style="border-bottom:1px solid #000"><th style="text-align:left;padding:5px">Item</th><th style="text-align:left;padding:5px">HSN</th><th style="text-align:center;padding:5px">Qty</th><th style="text-align:right;padding:5px">Price</th><th style="text-align:right;padding:5px">Total</th></tr></thead><tbody id="print-items"></tbody></table>
+    <div style="text-align:right">
+        <p>Taxable Amount: &#8377;<span id="print-subtotal"></span></p>
+        <p>Discount: &#8377;<span id="print-discount"></span></p>
+        <p>CGST: &#8377;<span id="print-cgst"></span></p>
+        <p>SGST: &#8377;<span id="print-sgst"></span></p>
+        <h3 style="border-top:1px dashed #000;padding-top:10px">Grand Total: &#8377;<span id="print-total"></span></h3>
+        <p id="print-words" style="font-size:11px;max-width:400px;margin-left:auto"></p>
+    </div>
+    <div style="margin-top:20px;font-size:11px"><strong>Terms:</strong> Goods once sold will not be taken back/replaced/refunded. Handset covered under manufacturer warranty.</div>
     <div style="text-align:center;margin-top:40px;font-size:12px;color:#555"><p>Thank you for shopping at Vimal Mobiles!</p></div>
 </div>
 
@@ -463,6 +484,29 @@ window.onerror = function(message, source, lineno) {
     var msg    = document.getElementById('diagnostic-err-msg');
     if (banner && msg) { msg.innerText = errStr; banner.classList.remove('hidden'); }
     return false;
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHOP DETAILS — edit these to match your registration; used on every
+// invoice PDF/print. Bank fields are optional (leave blank to hide).
+// ═══════════════════════════════════════════════════════════════════════
+var SHOP_CONFIG = {
+    name:    'THE VIMAL MOBILES',
+    gstin:   '33CGFPD7938D1ZL',
+    mobile:  '+91 8778470847',
+    email:   'Thevimalmobiles@gmail.com',
+    address: 'No:6/177 Jaya nagar, Ottiyambakkam main road Sithalapakkam, chennai, TAMIL NADU, 600126',
+    placeOfSupply: '33-TAMIL NADU',
+    bank: {
+        name: 'Equitas Small Finance Bank',
+        account: '100013889807',
+        ifsc: 'esfb0001122',
+        branch: 'MUGALIVAKKAM',
+    },
+    terms: [
+        'Goods once sold will not be taken back/replaced/refunded. Handset is covered under 1 Year manufacturers warranty and 6 Months Warranty for In the Box Accessories. For after sale service, contact brand\'s Authorized Service Centre.',
+        'Customer should verify & sign with date on the invoice below.',
+    ],
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -510,6 +554,31 @@ var api = {
 // ═══════════════════════════════════════════════════════════════════════
 // MAIN APP OBJECT
 // ═══════════════════════════════════════════════════════════════════════
+// Converts a whole rupee amount into words, Indian numbering (lakh/crore) style
+function numberToWordsIndian(num) {
+    if (num === 0) return 'Zero Rupees';
+    var ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten',
+        'Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+    var tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+    function twoDigits(n) { return n < 20 ? ones[n] : (tens[Math.floor(n/10)] + (n%10 ? ' ' + ones[n%10] : '')); }
+    function threeDigits(n) {
+        var s = '';
+        if (n >= 100) { s += ones[Math.floor(n/100)] + ' Hundred '; n %= 100; }
+        if (n > 0) s += twoDigits(n);
+        return s.trim();
+    }
+    var crore = Math.floor(num / 10000000); num %= 10000000;
+    var lakh  = Math.floor(num / 100000);   num %= 100000;
+    var thousand = Math.floor(num / 1000);  num %= 1000;
+    var hundred = num;
+    var parts = [];
+    if (crore)    parts.push(threeDigits(crore) + ' Crore');
+    if (lakh)     parts.push(threeDigits(lakh) + ' Lakh');
+    if (thousand) parts.push(threeDigits(thousand) + ' Thousand');
+    if (hundred)  parts.push(threeDigits(hundred));
+    return 'INR ' + parts.join(' ') + ' Rupees';
+}
+
 var app = {
     user: null,
     cart: [],
@@ -659,6 +728,7 @@ var app = {
         this.applyRolePermissions();
         this.showView('dashboard', null);
         this.loadFromServer();
+        this.preloadLogo();
     },
 
     logout: function(silent) {
@@ -779,7 +849,7 @@ var app = {
         if (!p || p.stock <= 0) { this.showAlert('Out of stock!', 'warning'); return; }
         var ex = this.cart.find(function(x){ return x.id === id; });
         if (ex) { if (ex.qty >= p.stock) { this.showAlert('Cannot exceed available stock', 'warning'); return; } ex.qty++; }
-        else this.cart.push({ id: p.id, name: p.name, price: p.price, qty: 1 });
+        else this.cart.push({ id: p.id, name: p.name, price: p.price, qty: 1, hsn: p.hsn || '' });
         this.renderCart();
     },
 
@@ -821,15 +891,17 @@ var app = {
     completeSale: function() {
         var self = this;
         if (!this.cart.length) { this.showAlert('Cart is empty', 'warning'); return; }
-        var mobile = document.getElementById('cart-customer-mobile').value.trim();
-        var name   = document.getElementById('cart-customer-name').value.trim() || 'Walk-in';
+        var mobile  = document.getElementById('cart-customer-mobile').value.trim();
+        var name    = document.getElementById('cart-customer-name').value.trim() || 'Walk-in';
+        var address = document.getElementById('cart-customer-address').value.trim();
+        var payMode = document.getElementById('cart-payment-mode').value;
         if (!mobile) { this.showAlert('Please enter customer mobile', 'warning'); return; }
         var sub   = parseFloat(document.getElementById('cart-subtotal').innerText) || 0;
         var disc  = parseFloat(document.getElementById('cart-discount').value) || 0;
         var gst   = parseFloat(document.getElementById('cart-gst').value) || 0;
         var total = parseFloat(document.getElementById('cart-total').innerText);
         var invNo = 'VM' + String(Date.now()).slice(-6);
-        var cartSnapshot = this.cart.map(function(item){ return { name: item.name, qty: item.qty, price: item.price }; });
+        var cartSnapshot = this.cart.map(function(item){ return { name: item.name, qty: item.qty, price: item.price, hsn: item.hsn || '' }; });
 
         api.post('/sales/record', {
             invoiceNo:    invNo,
@@ -852,13 +924,15 @@ var app = {
             // the cart gets cleared right after this, so nothing here can
             // rely on live cart/form state.
             self.lastSale = {
-                invoiceNo: invNo, customer: name, mobile: mobile, date: new Date().toLocaleDateString('en-IN'),
+                invoiceNo: invNo, customer: name, mobile: mobile, address: address, payMode: payMode,
+                date: new Date().toLocaleDateString('en-IN'),
                 items: cartSnapshot, subtotal: sub, discount: disc, gst: gst, total: total,
             };
 
             self.cart = []; self.renderCart(); self.renderPOSProducts();
-            document.getElementById('cart-customer-mobile').value = '';
-            document.getElementById('cart-customer-name').value   = '';
+            document.getElementById('cart-customer-mobile').value  = '';
+            document.getElementById('cart-customer-name').value    = '';
+            document.getElementById('cart-customer-address').value = '';
 
             document.getElementById('sc-invoice-no').innerText = invNo;
             document.getElementById('sc-total').innerText      = total.toFixed(2);
@@ -870,33 +944,125 @@ var app = {
     },
 
     // ── Invoice PDF / Print / WhatsApp (uses the last completed sale) ──
+    preloadLogo: function() {
+        var self = this;
+        if (this.logoDataUrl) return;
+        fetch('logo.png').then(function(r){ return r.blob(); }).then(function(blob) {
+            var reader = new FileReader();
+            reader.onload = function() { self.logoDataUrl = reader.result; };
+            reader.readAsDataURL(blob);
+        }).catch(function() { /* logo just won't appear on the PDF if this fails */ });
+    },
+
     _buildInvoicePDF: function() {
-        var s = this.lastSale;
+        var s = this.lastSale, cfg = SHOP_CONFIG;
         var doc = new (window.jspdf.jsPDF)();
-        doc.setFontSize(18); doc.text('VIMAL MOBILES', 105, 18, { align: 'center' });
-        doc.setFontSize(10); doc.text('Tambaram, Chennai | Ph: 9876543210', 105, 25, { align: 'center' });
-        doc.setFontSize(13); doc.text('TAX INVOICE', 105, 33, { align: 'center' });
-        doc.setFontSize(10);
-        doc.text('Customer: ' + s.customer, 14, 45);
-        doc.text('Mobile: ' + s.mobile, 14, 51);
-        doc.text('Invoice: ' + s.invoiceNo, 196, 45, { align: 'right' });
-        doc.text('Date: ' + s.date, 196, 51, { align: 'right' });
+        var pageW = 210, marginL = 14, marginR = 196;
+
+        // ── Header: logo + business details (left), TAX INVOICE + invoice# (right) ──
+        if (this.logoDataUrl) { try { doc.addImage(this.logoDataUrl, 'PNG', marginL, 10, 18, 18); } catch (e) {} }
+        var textX = this.logoDataUrl ? marginL + 22 : marginL;
+        doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.text(cfg.name, textX, 16);
+        doc.setFontSize(8); doc.setFont(undefined, 'normal');
+        doc.text('GSTIN ' + cfg.gstin, textX, 21);
+        doc.text('Mobile ' + cfg.mobile, textX, 25.5);
+        doc.text('Email ' + cfg.email, textX, 30);
+
+        doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.text('TAX INVOICE', marginR, 14, { align: 'right' });
+        doc.setFontSize(7); doc.setFont(undefined, 'normal'); doc.text('ORIGINAL FOR RECIPIENT', marginR, 18, { align: 'right' });
+        doc.setFontSize(9);
+        doc.text('Invoice #: ' + s.invoiceNo, marginR, 24, { align: 'right' });
+        doc.text('Invoice Date: ' + s.date, marginR, 29, { align: 'right' });
+
+        doc.setDrawColor(200); doc.line(marginL, 35, marginR, 35);
+
+        // ── Bill From / Bill To ──
+        var y = 42;
+        doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.text('Bill From:', marginL, y);
+        doc.setFont(undefined, 'normal');
+        var fromLines = doc.splitTextToSize(cfg.name + '\n' + cfg.address, 85);
+        doc.text(fromLines, marginL, y + 5);
+
+        doc.setFont(undefined, 'bold'); doc.text('Bill To:', 110, y);
+        doc.setFont(undefined, 'normal');
+        var billToText = s.customer + (s.address ? '\n' + s.address : '') + '\nPh: ' + s.mobile;
+        var toLines = doc.splitTextToSize(billToText, 85);
+        doc.text(toLines, 110, y + 5);
+
+        var afterAddrY = y + 5 + Math.max(fromLines.length, toLines.length) * 4.2 + 4;
+        doc.setFont(undefined, 'bold'); doc.setFontSize(8);
+        doc.text('Place of Supply: ' + cfg.placeOfSupply, marginL, afterAddrY);
+
+        // ── Item table ──
+        var taxable = s.subtotal - s.discount;
+        var totalTax = taxable * s.gst / 100;
+        var cgstRate = s.gst / 2, sgstRate = s.gst / 2;
 
         doc.autoTable({
-            startY: 58,
-            head: [['Item', 'Qty', 'Price (₹)', 'Total (₹)']],
-            body: s.items.map(function(i){ return [i.name, i.qty, i.price.toFixed(2), (i.qty*i.price).toFixed(2)]; }),
-            theme: 'grid', headStyles: { fillColor: [30,41,59] },
+            startY: afterAddrY + 5,
+            head: [['#', 'Item', 'HSN/SAC', 'Rate/Item', 'Qty', 'Amount']],
+            body: s.items.map(function(item, i){
+                return [i+1, item.name, item.hsn || '-', '\u20b9' + item.price.toFixed(2), item.qty, '\u20b9' + (item.qty*item.price).toFixed(2)];
+            }),
+            theme: 'grid', headStyles: { fillColor: [30,41,59], fontSize: 8 }, styles: { fontSize: 8 },
+            columnStyles: { 0: {cellWidth: 8}, 1: {cellWidth: 62} },
         });
 
-        var y = doc.lastAutoTable.finalY + 10;
-        doc.text('Subtotal: Rs. ' + s.subtotal.toFixed(2), 196, y, { align: 'right' }); y += 6;
-        doc.text('Discount: Rs. ' + s.discount.toFixed(2), 196, y, { align: 'right' }); y += 6;
-        doc.text('GST: ' + s.gst + '%', 196, y, { align: 'right' }); y += 8;
-        doc.setFontSize(13); doc.setFont(undefined, 'bold');
-        doc.text('Grand Total: Rs. ' + s.total.toFixed(2), 196, y, { align: 'right' });
-        doc.setFontSize(9); doc.setFont(undefined, 'normal');
-        doc.text('Thank you for shopping at Vimal Mobiles!', 105, y + 15, { align: 'center' });
+        var ty = doc.lastAutoTable.finalY + 8;
+
+        // ── Bank details (left) + totals block (right) ──
+        if (cfg.bank && cfg.bank.account) {
+            doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.text('Bank Details:', marginL, ty);
+            doc.setFont(undefined, 'normal');
+            doc.text('Bank: ' + cfg.bank.name, marginL, ty + 5);
+            doc.text('Account #: ' + cfg.bank.account, marginL, ty + 10);
+            doc.text('IFSC: ' + cfg.bank.ifsc + '   Branch: ' + cfg.bank.branch, marginL, ty + 15);
+        }
+
+        var ry = ty;
+        function totalRow(label, val, bold) {
+            doc.setFont(undefined, bold ? 'bold' : 'normal');
+            doc.setFontSize(bold ? 11 : 9);
+            doc.text(label, 150, ry);
+            doc.text(val, marginR, ry, { align: 'right' });
+            ry += bold ? 7 : 5.5;
+        }
+        totalRow('Taxable Amount', '\u20b9' + taxable.toFixed(2));
+        if (s.discount > 0) totalRow('Discount', '\u20b9' + s.discount.toFixed(2));
+        totalRow('CGST ' + cgstRate.toFixed(1) + '%', '\u20b9' + (totalTax/2).toFixed(2));
+        totalRow('SGST ' + sgstRate.toFixed(1) + '%', '\u20b9' + (totalTax/2).toFixed(2));
+        doc.line(150, ry, marginR, ry); ry += 5;
+        totalRow('Total', '\u20b9' + s.total.toFixed(2), true);
+        doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(0,140,0);
+        doc.text((s.payMode || 'Paid'), marginR, ry, { align: 'right' });
+        doc.setTextColor(0);
+
+        var y2 = Math.max(ty + (cfg.bank && cfg.bank.account ? 22 : 0), ry + 6);
+        doc.setFontSize(8);
+        doc.text('Total Items / Qty : ' + s.items.length + ' / ' + s.items.reduce(function(a,i){return a+i.qty;},0), marginL, y2);
+        var wordsLines = doc.splitTextToSize('Total amount (in words): ' + numberToWordsIndian(Math.round(s.total)) + ' Only.', 180);
+        doc.text(wordsLines, marginL, y2 + 5);
+
+        var y3 = y2 + 5 + wordsLines.length * 4.2 + 6;
+        doc.setFont(undefined, 'bold'); doc.text('Notes:', marginL, y3);
+        doc.setFont(undefined, 'normal'); doc.text('Thank you for the business.', marginL, y3 + 5);
+
+        doc.setFont(undefined, 'bold'); doc.text('Terms and Conditions:', marginL, y3 + 12);
+        doc.setFont(undefined, 'normal');
+        var ty2 = y3 + 17;
+        cfg.terms.forEach(function(t, i) {
+            var lines = doc.splitTextToSize((i+1) + '. ' + t, 180);
+            doc.text(lines, marginL, ty2);
+            ty2 += lines.length * 4.2 + 1;
+        });
+
+        doc.setFontSize(9); doc.text('For ' + cfg.name, marginR, y3, { align: 'right' });
+        doc.setFontSize(7); doc.text('Authorized Signatory', marginR, y3 + 12, { align: 'right' });
+
+        doc.setFontSize(7); doc.setTextColor(150);
+        doc.text('This is a computer generated invoice.', 105, 287, { align: 'center' });
+        doc.setTextColor(0);
+
         return doc;
     },
 
@@ -936,16 +1102,21 @@ var app = {
     printInvoice: function() {
         if (!this.lastSale) return;
         var s = this.lastSale;
-        document.getElementById('print-cust-name').innerText   = s.customer;
-        document.getElementById('print-cust-mobile').innerText = s.mobile;
-        document.getElementById('print-inv-no').innerText      = s.invoiceNo;
-        document.getElementById('print-date').innerText        = s.date;
-        document.getElementById('print-subtotal').innerText    = s.subtotal.toFixed(2);
-        document.getElementById('print-discount').innerText    = s.discount.toFixed(2);
-        document.getElementById('print-gst').innerText         = s.gst + '%';
-        document.getElementById('print-total').innerText       = s.total.toFixed(2);
+        var taxable = s.subtotal - s.discount;
+        var totalTax = taxable * s.gst / 100;
+        document.getElementById('print-cust-name').innerText    = s.customer;
+        document.getElementById('print-cust-address').innerText = s.address || '';
+        document.getElementById('print-cust-mobile').innerText  = s.mobile;
+        document.getElementById('print-inv-no').innerText       = s.invoiceNo;
+        document.getElementById('print-date').innerText         = s.date;
+        document.getElementById('print-subtotal').innerText     = taxable.toFixed(2);
+        document.getElementById('print-discount').innerText     = s.discount.toFixed(2);
+        document.getElementById('print-cgst').innerText         = (totalTax/2).toFixed(2);
+        document.getElementById('print-sgst').innerText         = (totalTax/2).toFixed(2);
+        document.getElementById('print-total').innerText        = s.total.toFixed(2);
+        document.getElementById('print-words').innerText        = 'Amount in words: ' + numberToWordsIndian(Math.round(s.total)) + ' Only.';
         document.getElementById('print-items').innerHTML = s.items.map(function(i) {
-            return '<tr><td style="padding:5px">'+i.name+'</td><td style="text-align:center;padding:5px">'+i.qty+'</td><td style="text-align:right;padding:5px">&#8377;'+i.price.toFixed(2)+'</td><td style="text-align:right;padding:5px">&#8377;'+(i.qty*i.price).toFixed(2)+'</td></tr>';
+            return '<tr><td style="padding:5px">'+i.name+'</td><td style="padding:5px">'+(i.hsn||'-')+'</td><td style="text-align:center;padding:5px">'+i.qty+'</td><td style="text-align:right;padding:5px">&#8377;'+i.price.toFixed(2)+'</td><td style="text-align:right;padding:5px">&#8377;'+(i.qty*i.price).toFixed(2)+'</td></tr>';
         }).join('');
         window.print();
     },
@@ -1347,7 +1518,7 @@ var app = {
             var nums = line.match(/[\d,]+(?:\.\d+)?/g); if (!nums || nums.length < 2) return;
             var cleanNums = nums.map(function(n){ return parseFloat(n.replace(/,/g,'')); }).filter(function(n){ return !isNaN(n)&&n>0; });
             if (cleanNums.length < 1) return;
-            var name = line.replace(/[\d,]+(?:\.\d+)?/g,'').replace(/\s{2,}/g,' ').trim().replace(/^[\.\-\*\s#]+/,'').replace(/[^\w\s\-\/\(\)\.&+]/g,'').trim();
+            var name = line.replace(/[\d,]+(?:\.\d+)?/g,'').replace(/\s{2,}/g,' ').trim().replace(/^[\.\-\*\s#\/]+/,'').replace(/[^\w\s\-\/\(\)\.&+]/g,'').replace(/\b(NOS|PCS|PC|UNIT|UNITS|EA|EACH|QTY)\b/gi,'').replace(/\s{2,}/g,' ').trim();
             if (name.length < 3) return;
             var qty=1,rate=0,amount=0;
             if (cleanNums.length>=3){ qty=cleanNums[cleanNums.length-3]; rate=cleanNums[cleanNums.length-2]; amount=cleanNums[cleanNums.length-1]; }
@@ -1364,7 +1535,7 @@ var app = {
                 var nums=line.match(/[\d,]+(?:\.\d+)?/g); if(!nums||nums.length<2) return;
                 var cleanNums=nums.map(function(n){ return parseFloat(n.replace(/,/g,'')); }).filter(function(n){ return !isNaN(n)&&n>0&&n<1000000; });
                 if (cleanNums.length<2) return;
-                var name=line.replace(/[\d,]+(?:\.\d+)?/g,'').replace(/\s{2,}/g,' ').replace(/^[\.\-\*\s#]+/,'').trim();
+                var name=line.replace(/[\d,]+(?:\.\d+)?/g,'').replace(/\s{2,}/g,' ').replace(/^[\.\-\*\s#\/]+/,'').replace(/\b(NOS|PCS|PC|UNIT|UNITS|EA|EACH|QTY)\b/gi,'').replace(/\s{2,}/g,' ').trim();
                 if (name.length<3||/total|gst|tax|amount|subtotal/i.test(name)) return;
                 var rate=cleanNums[cleanNums.length-1], qty=cleanNums.length>1?cleanNums[cleanNums.length-2]:1;
                 if (qty>999||qty<1) qty=1;
