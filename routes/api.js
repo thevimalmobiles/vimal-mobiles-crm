@@ -17,7 +17,8 @@
 
 const express = require('express');
 const router  = express.Router();
-const { sheetToObjects, upsertRow, deleteRowById, getLastRow, today } = require('../sheets');
+const { sheetToObjects, upsertRow, deleteRowById, getLastRow, CATEGORIES, today } = require('../sheets');
+const { login, changePassword, requireAuth, requireAdmin } = require('../auth');
 
 // ── Helpers ───────────────────────────────────────────────────────────
 function str(v) {
@@ -40,9 +41,53 @@ function wrap(res, fn) {
     .then(data => res.json({ ok: true, data }))
     .catch(err => {
       console.error(err);
-      res.status(500).json({ ok: false, error: err.message });
+      res.status(err.status || 500).json({ ok: false, error: err.message });
     });
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// AUTH — these two routes are the only ones NOT behind requireAuth
+// ══════════════════════════════════════════════════════════════════════
+router.post('/auth/login', (req, res) => {
+  wrap(res, async () => {
+    const { username, password } = req.body;
+    if (!username || !password) throw new Error('Username and password are required');
+    const result = await login(username, password);
+    if (!result) {
+      const err = new Error('Invalid username or password');
+      err.status = 401;
+      throw err;
+    }
+    return result; // { token, role, name }
+  });
+});
+
+// Everything below this line requires a valid logged-in session
+router.use(requireAuth);
+
+// POST /api/auth/change-password  (admin only, can change ANY user's password)
+router.post('/auth/change-password', requireAdmin, (req, res) => {
+  wrap(res, async () => {
+    const { username, newPassword } = req.body;
+    if (!username || !newPassword) throw new Error('Username and newPassword are required');
+    if (newPassword.length < 4) throw new Error('Password must be at least 4 characters');
+    await changePassword(username, newPassword);
+    return { updated: username };
+  });
+});
+
+// GET /api/auth/users  (admin only — list accounts so passwords can be changed)
+router.get('/auth/users', requireAdmin, (req, res) => {
+  wrap(res, async () => {
+    const users = await sheetToObjects('Users');
+    return users.map(u => ({ username: u['Username'], role: u['Role'], name: u['Display Name'] }));
+  });
+});
+
+// GET /api/auth/whoami  (used by the frontend to restore a session on refresh)
+router.get('/auth/whoami', (req, res) => {
+  res.json({ ok: true, data: { username: req.user.username, role: req.user.role, name: req.user.name } });
+});
 
 // ══════════════════════════════════════════════════════════════════════
 // GET /api/crm-data  →  getCRMData()
@@ -60,7 +105,12 @@ router.get('/crm-data', (req, res) => {
       id:          str(r['Product ID']),
       name:        r['Product Name'],
       category:    r['Category'],
-      brand:       'Generic',
+      subcategory: r['Subcategory'] || '',
+      brand:       r['Brand'] || 'Generic',
+      model:       r['Model'] || '',
+      hsn:         str(r['HSN Code'] || ''),
+      imei:        str(r['IMEI'] || ''),
+      batch:       str(r['Batch No'] || ''),
       cost:        r['Cost Price'],
       selling:     r['Selling Price'],
       stock:       r['Stock'],
@@ -100,7 +150,8 @@ router.get('/crm-data', (req, res) => {
       notes:    r['Notes'],
     }));
 
-    return { Inventory, Customers, Repairs, Expenses };
+    // Staff accounts don't see expense data, even via the API directly
+    return { Inventory, Customers, Repairs, Expenses: req.user.role === 'admin' ? Expenses : [] };
   });
 });
 
@@ -110,14 +161,38 @@ router.get('/crm-data', (req, res) => {
 router.post('/inventory/save', (req, res) => {
   wrap(res, async () => {
     const p = req.body;
-    const id = p.id || ('P' + String(Date.now()).slice(-6));
+
+    // Mobiles: each physical phone is its own row, ID'd by its unique IMEI
+    // (stock is always 1/0, since one row = one device). Accessories/Spares
+    // use a generated Product ID and a real stock count instead.
+    let id = p.id;
+    if (!id) {
+      if (p.category === 'Mobiles') {
+        if (!p.imei) throw new Error('IMEI is required for Mobiles');
+        id = p.imei.trim();
+      } else {
+        id = 'P' + String(Date.now()).slice(-6) + Math.floor(Math.random() * 90 + 10);
+      }
+    }
+
+    const stock = p.category === 'Mobiles' ? 1 : (p.stock || 0);
+
     await upsertRow('Inventory', id, {
       'Product ID':    id,
       'Product Name':  p.name,
       'Category':      p.category,
+      'Subcategory':   p.category === 'Accessories' ? (p.subcategory || '') : '',
+      'Brand':         p.brand || 'Generic',
+      'Model':         p.model || '',
+      'HSN Code':      p.hsn || '',
+      'IMEI':          p.category === 'Mobiles' ? id : '',
+      'Batch No':      p.batch || '',
       'Cost Price':    p.cost,
       'Selling Price': p.selling,
-      'Stock':         p.stock,
+      'Stock':         stock,
+      'Supplier Name': p.supplier || '',
+      'Invoice No':    p.invoiceNo || '',
+      'Invoice Date':  p.invoiceDate || '',
     });
     return { id };
   });
@@ -187,7 +262,7 @@ router.post('/repairs/save', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 // POST /api/expenses/add  →  addExpense()
 // ══════════════════════════════════════════════════════════════════════
-router.post('/expenses/add', (req, res) => {
+router.post('/expenses/add', requireAdmin, (req, res) => {
   wrap(res, async () => {
     const e = req.body;
     const id = 'E' + String(Date.now()).slice(-6);
