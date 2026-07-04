@@ -81,6 +81,7 @@
             <img id="sidebar-logo" alt="Vimal Mobiles" style="width:52px;height:52px;border-radius:50%;object-fit:cover;margin-bottom:6px">
             <h4>Vimal Mobiles</h4>
             <small id="user-role-badge" class="badge bg-primary mt-2">Admin</small>
+            <div id="branch-switcher-wrap"></div>
         </div>
         <ul id="nav-menu">
             <li class="nav-item active"><a href="#" onclick="app.showView('dashboard',this)"><i class="fas fa-chart-line"></i> Dashboard</a></li>
@@ -108,11 +109,12 @@
         <div class="p-4">
             <!-- DASHBOARD -->
             <div id="view-dashboard" class="view-section">
+                <div id="dashboard-branch-banner" class="mb-3 text-muted small"></div>
                 <div class="row">
                     <div class="col-md-3 col-sm-6"><div class="kpi-card success"><div class="kpi-title">Today's Sales</div><div class="kpi-value">&#8377;<span id="kpi-sales">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6 admin-only"><div class="kpi-card"><div class="kpi-title">Daily Profit</div><div class="kpi-value text-primary">&#8377;<span id="kpi-profit">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6"><div class="kpi-card warning"><div class="kpi-title">Service Income</div><div class="kpi-value">&#8377;<span id="kpi-service">0</span></div></div></div>
-                    <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-title">TG Sales</div><div class="kpi-value">&#8377;<span id="kpi-glass">0</span></div></div></div>
+                    <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-title">Repairs Today</div><div class="kpi-value"><span id="kpi-glass">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6 admin-only"><div class="kpi-card danger"><div class="kpi-title">Spare Parts Cost</div><div class="kpi-value">&#8377;<span id="kpi-spares">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6"><div class="kpi-card success"><div class="kpi-title">Active Repairs</div><div class="kpi-value"><span id="kpi-activerepairs">0</span></div></div></div>
                 </div>
@@ -523,6 +525,7 @@ var db = {
     repairs:   [],
     customers: [],
     expenses:  [],
+    sales:     [],
     finance: [
         {date:'2026-06-10',invoiceNo:'VM55432',customer:'Sunil Kumar',partner:'DMI Finance',appNo:'DMI9081273',downpayment:5000,loanAmount:12500,status:'Pending'},
         {date:'2026-06-11',invoiceNo:'VM55435',customer:'Deepak',partner:'Samsung Finance+',appNo:'SF99238',downpayment:3000,loanAmount:14999,status:'Disbursed'}
@@ -591,13 +594,16 @@ var app = {
     currentCategory: '',
     currentSubcategory: '',
     lastSale: null,
+    activeBranch: 'All', // for staff this always equals user.branch; admin can switch
+    branches: ['Sithalapakkam', 'Arasankazhani'], // fallback; refreshed from /api/meta on login
     extractedItems: [],
     extractedHeader: {},
 
     // ── Load all CRM data from the Node server (called after login) ───
     loadFromServer: function() {
         var self = this;
-        api.get('/crm-data').then(function(data) {
+        var qs = (this.user.role === 'admin' && this.activeBranch !== 'All') ? ('?branch=' + encodeURIComponent(this.activeBranch)) : '';
+        api.get('/crm-data' + qs).then(function(data) {
             if (data.Inventory) {
                 db.products = data.Inventory.map(function(item) {
                     return {
@@ -611,6 +617,7 @@ var app = {
                         imei:        item.imei     || '',
                         batch:       item.batch    || '',
                         supplier:    item.supplier || '',
+                        branch:      item.branch   || '',
                         price:    parseFloat(item.selling || 0),
                         pprice:   parseFloat(item.cost    || 0),
                         stock:    parseInt(item.stock     || 0),
@@ -619,7 +626,7 @@ var app = {
             }
             if (data.Customers) {
                 db.customers = data.Customers.map(function(c) {
-                    return { name: c.name || '', mobile: c.mobile || '', total: parseFloat(c.history || 0), pending: parseFloat(c.pending || 0) };
+                    return { name: c.name || '', mobile: c.mobile || '', total: parseFloat(c.history || 0), pending: parseFloat(c.pending || 0), branch: c.branch || '' };
                 });
             }
             if (data.Repairs) {
@@ -631,14 +638,19 @@ var app = {
                         mobile: r.phone || '', brand: r.brand || '', model: r.model || '',
                         issue: r.issue || '',
                         device: (r.brand && r.model) ? (r.brand + ' ' + r.model) : '',
-                        status: r.status || 'Received',
+                        status: r.status || 'Received', branch: r.branch || '',
                         spare: total - service, service: service, total: total,
                     };
                 });
             }
             if (data.Expenses) {
                 db.expenses = data.Expenses.map(function(e) {
-                    return { date: e.date || '', cat: e.category || 'Other', desc: e.notes || '', amount: parseFloat(e.amount || 0), addedBy: 'Admin' };
+                    return { date: e.date || '', cat: e.category || 'Other', desc: e.notes || '', amount: parseFloat(e.amount || 0), addedBy: 'Admin', branch: e.branch || '' };
+                });
+            }
+            if (data.Sales) {
+                db.sales = data.Sales.map(function(s) {
+                    return { id: s.id || '', date: s.date || '', name: s.name || '', revenue: parseFloat(s.revenue||0), cost: parseFloat(s.cost||0), profit: parseFloat(s.profit||0), branch: s.branch || '' };
                 });
             }
             self.loadDashboard();
@@ -650,7 +662,7 @@ var app = {
     },
 
     // ── Re-fetch everything from the sheet ───────────────────────────
-    refresh: function() { this.init(); },
+    refresh: function() { this.loadFromServer(); },
 
     // ── Toast alerts ─────────────────────────────────────────────────
     showAlert: function(message, type) {
@@ -716,7 +728,7 @@ var app = {
         btn.disabled = true; btn.innerText = 'Logging in…';
         api.post('/auth/login', { username: u, password: p }).then(function(res) {
             localStorage.setItem('vm_token', res.token);
-            self.user = { username: u, role: res.role, name: res.name };
+            self.user = { username: u, role: res.role, name: res.name, branch: res.branch };
             self.enterApp();
         }).catch(function(err) {
             errEl.innerText = err.message || 'Login failed';
@@ -731,9 +743,46 @@ var app = {
         document.getElementById('main-app').classList.remove('hidden');
         document.getElementById('topbar-username').innerText = this.user.name;
         document.getElementById('user-role-badge').innerText = this.user.role === 'admin' ? 'Admin' : 'Staff';
+        this.activeBranch = (this.user.role === 'admin') ? 'All' : this.user.branch;
         this.applyRolePermissions();
         this.showView('dashboard', null);
         this.loadFromServer();
+        var self = this;
+        api.get('/meta').then(function(m) {
+            if (m.branches && m.branches.length) self.branches = m.branches;
+            self.renderBranchSwitcher();
+        }).catch(function() { self.renderBranchSwitcher(); }); // fall back to default list
+    },
+
+    // ── Branch switcher (admin only) / branch badge (staff) ────────────
+    renderBranchSwitcher: function() {
+        var self = this;
+        var wrap = document.getElementById('branch-switcher-wrap');
+        if (this.user.role === 'admin') {
+            var opts = '<option value="All">All Branches</option>' +
+                this.branches.map(function(b){ return '<option value="'+b+'"'+(self.activeBranch===b?' selected':'')+'>'+b+'</option>'; }).join('');
+            wrap.innerHTML = '<select id="branch-switcher" class="form-select form-select-sm mt-2" onchange="app.setActiveBranch(this.value)">' + opts + '</select>';
+        } else {
+            wrap.innerHTML = '<div class="small text-white-50 mt-2"><i class="fas fa-code-branch"></i> ' + (this.user.branch || '') + '</div>';
+        }
+    },
+
+    setActiveBranch: function(branch) {
+        this.activeBranch = branch;
+        this.loadFromServer();
+        this.renderInventory(); this.renderPOSProducts(); this.renderCustomers && this.renderCustomers();
+        this.showAlert('Now viewing: ' + (branch === 'All' ? 'All Branches' : branch), 'info');
+    },
+
+    // Returns the branch a write should be tagged with, or null (and shows a
+    // warning) if the admin has "All Branches" selected and must pick one first.
+    resolveWriteBranch: function() {
+        if (this.user.role !== 'admin') return this.user.branch;
+        if (this.activeBranch === 'All') {
+            this.showAlert('Select a specific branch (not "All Branches") before adding data.', 'warning');
+            return null;
+        }
+        return this.activeBranch;
     },
 
     logout: function(silent) {
@@ -803,15 +852,32 @@ var app = {
 
     // ── Dashboard ─────────────────────────────────────────────────────
     loadDashboard: function() {
-        var repairsList = db.repairs || [];
-        var sIncome = repairsList.reduce(function(s,r){ return s + (parseFloat(r.service)||0); }, 0);
-        var spCost  = repairsList.reduce(function(s,r){ return s + (parseFloat(r.spare)||0); }, 0);
-        document.getElementById('kpi-sales').innerText = 2500;
-        document.getElementById('kpi-profit').innerText = 500 + sIncome;
-        document.getElementById('kpi-service').innerText = sIncome;
-        document.getElementById('kpi-glass').innerText = 400;
-        document.getElementById('kpi-spares').innerText = spCost;
-        document.getElementById('kpi-activerepairs').innerText = repairsList.filter(function(r){ return r.status !== 'Delivered'; }).length;
+        var todayStr = new Date().toISOString().slice(0, 10);
+        var sales   = db.sales   || [];
+        var repairs = db.repairs || [];
+
+        var todaySales   = sales.filter(function(s){ return s.date === todayStr; });
+        var todayRepairs = repairs.filter(function(r){ return r.date === todayStr; });
+
+        var salesRevenueToday = todaySales.reduce(function(s,x){ return s + (x.revenue||0); }, 0);
+        var salesProfitToday  = todaySales.reduce(function(s,x){ return s + (x.profit||0); }, 0);
+        var repairChargeToday = todayRepairs.reduce(function(s,r){ return s + (parseFloat(r.total)||0); }, 0);
+        var repairCostToday   = todayRepairs.reduce(function(s,r){ return s + (parseFloat(r.service)||0); }, 0);
+
+        document.getElementById('kpi-sales').innerText  = (salesRevenueToday + repairChargeToday).toFixed(0);
+        document.getElementById('kpi-profit').innerText = (salesProfitToday + (repairChargeToday - repairCostToday)).toFixed(0);
+        document.getElementById('kpi-service').innerText = repairChargeToday.toFixed(0);
+        document.getElementById('kpi-glass').innerText   = todayRepairs.length;
+        document.getElementById('kpi-spares').innerText  = repairCostToday.toFixed(0);
+        document.getElementById('kpi-activerepairs').innerText = repairs.filter(function(r){ return r.status !== 'Delivered'; }).length;
+
+        var banner = document.getElementById('dashboard-branch-banner');
+        if (this.user.role === 'admin') {
+            banner.innerHTML = '<i class="fas fa-code-branch"></i> Showing: <strong>' + (this.activeBranch === 'All' ? 'All Branches (combined)' : this.activeBranch) + '</strong>';
+        } else {
+            banner.innerHTML = '<i class="fas fa-code-branch"></i> Branch: <strong>' + this.user.branch + '</strong>';
+        }
+
         this.drawCharts();
     },
 
@@ -821,10 +887,29 @@ var app = {
             var el1 = document.getElementById('chart_sales');
             var el2 = document.getElementById('chart_revenue');
             if (!el1 || el1.offsetWidth === 0) return;
-            var ds = google.visualization.arrayToDataTable([['Date','Sales'],['Jun 10',660],['Jun 11',1030],['Jun 12',2500],['Jun 13',3500],['Jun 14',2800],['Jun 15',4100]]);
+
+            // Last 7 days combined revenue (product sales + repair charges), by date
+            var days = [];
+            for (var i = 6; i >= 0; i--) {
+                var d = new Date(); d.setDate(d.getDate() - i);
+                days.push(d.toISOString().slice(0, 10));
+            }
+            var sales   = db.sales   || [];
+            var repairs = db.repairs || [];
+            var trendRows = [['Date', 'Revenue']];
+            days.forEach(function(day) {
+                var s = sales.filter(function(x){ return x.date === day; }).reduce(function(a,x){ return a + (x.revenue||0); }, 0);
+                var r = repairs.filter(function(x){ return x.date === day; }).reduce(function(a,x){ return a + (parseFloat(x.total)||0); }, 0);
+                trendRows.push([day.slice(5), s + r]);
+            });
+            var ds = google.visualization.arrayToDataTable(trendRows);
             new google.visualization.LineChart(el1).draw(ds,{curveType:'function',legend:{position:'bottom'},colors:['#3b82f6'],chartArea:{width:'85%',height:'70%'}});
-            var dr = google.visualization.arrayToDataTable([['Cat','Rev'],['Mobiles',11000],['Accessories',2000],['Tempered Glass',1500],['Service',3500]]);
-            new google.visualization.PieChart(el2).draw(dr,{pieHole:.4,colors:['#1e293b','#3b82f6','#10b981','#f59e0b'],legend:{position:'right'},chartArea:{width:'90%',height:'90%'}});
+
+            // Product sales vs service income split
+            var totalProductRevenue = sales.reduce(function(a,x){ return a + (x.revenue||0); }, 0);
+            var totalServiceRevenue = repairs.reduce(function(a,r){ return a + (parseFloat(r.total)||0); }, 0);
+            var dr = google.visualization.arrayToDataTable([['Type','Rev'],['Product Sales', totalProductRevenue],['Service Income', totalServiceRevenue]]);
+            new google.visualization.PieChart(el2).draw(dr,{pieHole:.4,colors:['#1e293b','#f59e0b'],legend:{position:'right'},chartArea:{width:'90%',height:'90%'}});
         } catch(e) { console.warn('Chart render deferred:', e); }
     },
 
@@ -896,6 +981,8 @@ var app = {
     completeSale: function() {
         var self = this;
         if (!this.cart.length) { this.showAlert('Cart is empty', 'warning'); return; }
+        var branch = this.resolveWriteBranch();
+        if (!branch) return;
         var mobile  = document.getElementById('cart-customer-mobile').value.trim();
         var name    = document.getElementById('cart-customer-name').value.trim() || 'Walk-in';
         var address = document.getElementById('cart-customer-address').value.trim();
