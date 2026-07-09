@@ -357,6 +357,29 @@
     </div></div>
 </div>
 
+<!-- INVOICE READY: PRINT / DOWNLOAD / SHARE -->
+<div class="modal fade" id="invoiceActionsModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header">
+            <h5 class="modal-title"><i class="fas fa-file-invoice text-primary me-2"></i>Invoice Ready</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body text-center">
+            <p class="mb-1">Invoice <strong id="ia-invoice-no"></strong> for <strong id="ia-customer-name"></strong></p>
+            <p class="text-muted small mb-4">Total: &#8377;<span id="ia-total"></span></p>
+            <div class="d-grid gap-2">
+                <button class="btn btn-outline-primary" onclick="app.printInvoice()"><i class="fas fa-print me-2"></i>Print Invoice</button>
+                <button class="btn btn-outline-primary" onclick="app.downloadInvoice()"><i class="fas fa-download me-2"></i>Download PDF</button>
+                <button class="btn btn-success" onclick="app.shareInvoiceWhatsApp()"><i class="fab fa-whatsapp me-2"></i>Share to Customer's WhatsApp</button>
+            </div>
+            <p class="text-muted small mt-3 mb-0" id="ia-share-note"></p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+    </div></div>
+</div>
+
 <!-- AI INGEST MODAL -->
 <div class="modal fade" id="uploadInvoiceModal" tabindex="-1">
     <div class="modal-dialog modal-xl"><div class="modal-content">
@@ -905,11 +928,6 @@ var app = {
                 gstPct: gstPct,
                 total: total,
             });
-
-            var msg     = 'Hello ' + name + ', thank you for shopping at Vimal Mobiles! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2) + '\nYour PDF invoice has been downloaded — please attach it in this chat.';
-            var cleaned = mobile.replace(/\D/g, '');
-            if (cleaned.length === 10) cleaned = '91' + cleaned;
-            window.open('https://wa.me/' + cleaned + '?text=' + encodeURIComponent(msg), '_blank');
         }).catch(function(err) {
             self.showAlert('Sale failed: ' + err.message, 'danger');
         }).finally(function() {
@@ -952,7 +970,14 @@ var app = {
     generateInvoicePDF: function(inv) {
         var self = this;
         this._loadJsPDF(function(err) {
-            if (err) { self.showAlert('Could not generate PDF: ' + err.message, 'warning'); return; }
+            if (err) {
+                self.showAlert('Could not generate PDF: ' + err.message + ' — sending a text-only WhatsApp message instead.', 'warning');
+                var msg = 'Hello ' + inv.customerName + ', thank you for shopping at Vimal Mobiles! Invoice: ' + inv.invoiceNo + ' | Total: \u20B9' + inv.total.toFixed(2);
+                var cleaned = inv.mobile.replace(/\D/g, '');
+                if (cleaned.length === 10) cleaned = '91' + cleaned;
+                window.open('https://wa.me/' + cleaned + '?text=' + encodeURIComponent(msg), '_blank');
+                return;
+            }
             try {
                 var jsPDF = window.jspdf.jsPDF;
                 var doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -1048,11 +1073,67 @@ var app = {
                 var termLines = doc.splitTextToSize(shop.terms, pageW - marginX * 2);
                 doc.text(termLines, marginX, y);
 
-                doc.save('Invoice-' + inv.invoiceNo + '.pdf');
+                self._lastInvoiceDoc  = doc;
+                self._lastInvoiceMeta = inv;
+                self.showInvoiceActions(inv);
             } catch (e) {
                 self.showAlert('PDF generation failed: ' + e.message, 'danger');
             }
         });
+    },
+
+    showInvoiceActions: function(inv) {
+        document.getElementById('ia-invoice-no').innerText     = inv.invoiceNo;
+        document.getElementById('ia-customer-name').innerText  = inv.customerName;
+        document.getElementById('ia-total').innerText          = inv.total.toFixed(2);
+        var shareNote = document.getElementById('ia-share-note');
+        var canShareFiles = !!(navigator.canShare && window.File);
+        shareNote.innerText = canShareFiles
+            ? 'Opens your phone/browser\u2019s share sheet with the invoice attached — pick WhatsApp there.'
+            : 'Your browser can\u2019t attach files directly — this will download the PDF and open a WhatsApp chat so you can attach it manually.';
+        this.openModal('invoiceActionsModal');
+    },
+
+    printInvoice: function() {
+        if (!this._lastInvoiceDoc) return;
+        var blobUrl = this._lastInvoiceDoc.output('bloburl');
+        var win = window.open(blobUrl, '_blank');
+        if (!win) { this.showAlert('Please allow pop-ups to print the invoice', 'warning'); return; }
+        // Most browsers show their own PDF viewer with a print button; this is a bonus
+        // trigger for browsers that let scripts call print() on the opened window.
+        setTimeout(function() { try { win.print(); } catch (e) { /* viewer handles it instead */ } }, 600);
+    },
+
+    downloadInvoice: function() {
+        if (!this._lastInvoiceDoc || !this._lastInvoiceMeta) return;
+        this._lastInvoiceDoc.save('Invoice-' + this._lastInvoiceMeta.invoiceNo + '.pdf');
+    },
+
+    shareInvoiceWhatsApp: function() {
+        var self = this;
+        if (!this._lastInvoiceDoc || !this._lastInvoiceMeta) return;
+        var inv      = this._lastInvoiceMeta;
+        var blob     = this._lastInvoiceDoc.output('blob');
+        var fileName = 'Invoice-' + inv.invoiceNo + '.pdf';
+        var msgText  = 'Hello ' + inv.customerName + ', thank you for shopping at Vimal Mobiles! Invoice: ' + inv.invoiceNo + ' | Total: \u20B9' + inv.total.toFixed(2);
+
+        var file;
+        try { file = new File([blob], fileName, { type: 'application/pdf' }); } catch (e) { file = null; }
+
+        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+            navigator.share({ files: [file], title: 'Invoice ' + inv.invoiceNo, text: msgText })
+                .catch(function(err) {
+                    if (err.name !== 'AbortError') self.showAlert('Share cancelled or failed: ' + err.message, 'warning');
+                });
+        } else {
+            // Browser can't attach files to a share sheet (e.g. most desktop browsers) —
+            // download the PDF and open a WhatsApp chat prefilled with the message instead.
+            self.downloadInvoice();
+            var cleaned = inv.mobile.replace(/\D/g, '');
+            if (cleaned.length === 10) cleaned = '91' + cleaned;
+            window.open('https://wa.me/' + cleaned + '?text=' + encodeURIComponent(msgText + '\nPlease find the attached PDF invoice (downloaded — attach it here).'), '_blank');
+            self.showAlert('PDF downloaded — attach it manually in the WhatsApp chat that just opened.', 'warning');
+        }
     },
 
     // ── Inventory ─────────────────────────────────────────────────────
