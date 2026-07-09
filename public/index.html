@@ -844,12 +844,33 @@ var app = {
 
     completeSale: function() {
         var self = this;
+        if (this._saving) return; // guard against double-click → duplicate Sales rows
         if (!this.cart.length) { this.showAlert('Cart is empty', 'warning'); return; }
         var mobile = document.getElementById('cart-customer-mobile').value.trim();
         var name   = document.getElementById('cart-customer-name').value.trim() || 'Walk-in';
         if (!mobile) { this.showAlert('Please enter customer mobile', 'warning'); return; }
-        var total  = parseFloat(document.getElementById('cart-total').innerText);
-        var invNo  = 'VM' + String(Date.now()).slice(-6);
+        var total    = parseFloat(document.getElementById('cart-total').innerText);
+        var subtotal = parseFloat(document.getElementById('cart-subtotal').innerText);
+        var discount = parseFloat(document.getElementById('cart-discount').value) || 0;
+        var gstPct   = parseFloat(document.getElementById('cart-gst').value) || 0;
+        var invNo    = 'VM' + String(Date.now()).slice(-6);
+
+        // Snapshot HSN/IMEI per line item now, before stock/cart get mutated below
+        var invoiceItems = this.cart.map(function(item) {
+            var p = db.products.find(function(x){ return x.id === item.id; });
+            return {
+                name:  item.name,
+                qty:   item.qty,
+                price: item.price,
+                amount: item.price * item.qty,
+                hsn:   p ? (p.hsn || '') : '',
+                imei:  (p && p.category === 'Mobiles') ? (p.imei || item.id) : '',
+            };
+        });
+
+        var btn = document.querySelector('.pos-cart .btn-success');
+        this._saving = true;
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...'; }
 
         api.post('/sales/record', {
             invoiceNo:    invNo,
@@ -873,12 +894,164 @@ var app = {
             document.getElementById('cart-customer-name').value   = '';
             self.showAlert('Sale complete! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2), 'success');
 
-            var msg     = 'Hello ' + name + ', thank you for shopping at Vimal Mobiles! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2);
+            self.generateInvoicePDF({
+                invoiceNo: invNo,
+                date: new Date().toLocaleDateString('en-GB'),
+                customerName: name,
+                mobile: mobile,
+                items: invoiceItems,
+                subtotal: subtotal,
+                discount: discount,
+                gstPct: gstPct,
+                total: total,
+            });
+
+            var msg     = 'Hello ' + name + ', thank you for shopping at Vimal Mobiles! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2) + '\nYour PDF invoice has been downloaded — please attach it in this chat.';
             var cleaned = mobile.replace(/\D/g, '');
             if (cleaned.length === 10) cleaned = '91' + cleaned;
             window.open('https://wa.me/' + cleaned + '?text=' + encodeURIComponent(msg), '_blank');
         }).catch(function(err) {
             self.showAlert('Sale failed: ' + err.message, 'danger');
+        }).finally(function() {
+            self._saving = false;
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-circle"></i> Complete Sale'; }
+        });
+    },
+
+    // ── PDF Invoice generation (client-side, styled after the shop's Swipe invoice) ──
+    _loadJsPDF: function(cb) {
+        if (window.jspdf && window.jspdf.jsPDF) { cb(); return; }
+        var CDNS = [
+            'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+            'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+            'https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js',
+        ];
+        function tryLoad(i) {
+            if (i >= CDNS.length) { cb(new Error('Could not load PDF library — check your internet connection')); return; }
+            var s = document.createElement('script'); s.src = CDNS[i];
+            s.onload = function(){ cb(); };
+            s.onerror = function(){ s.remove(); tryLoad(i + 1); };
+            document.head.appendChild(s);
+        }
+        tryLoad(0);
+    },
+
+    // Shop constants used on every generated invoice — edit these if your details change.
+    SHOP_INFO: {
+        name: 'THE VIMAL MOBILES',
+        gstin: 'GSTIN 33CGFPD7938D1ZL',
+        mobile: 'Mobile +91 8778470847',
+        email: 'Email Thevimalmobiles@gmail.com',
+        bankName: 'Equitas Small Finance Bank',
+        bankAcct: '100013889807',
+        bankIfsc: 'ESFB0001122',
+        bankBranch: 'MUGALIVAKKAM',
+        terms: 'Goods once sold will not be taken back/replaced/refunded. Handset is covered under 1 Year manufacturer warranty and 6 Months Warranty for In the Box Accessories. For after-sale service, contact the brand\u2019s Authorized Service Centre.',
+    },
+
+    generateInvoicePDF: function(inv) {
+        var self = this;
+        this._loadJsPDF(function(err) {
+            if (err) { self.showAlert('Could not generate PDF: ' + err.message, 'warning'); return; }
+            try {
+                var jsPDF = window.jspdf.jsPDF;
+                var doc = new jsPDF({ unit: 'pt', format: 'a4' });
+                var pageW = doc.internal.pageSize.getWidth();
+                var marginX = 40, y = 50;
+                var shop = self.SHOP_INFO;
+
+                // ── Header ──
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+                doc.text(shop.name, marginX, y);
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                y += 16; doc.text(shop.gstin, marginX, y);
+                y += 13; doc.text(shop.mobile, marginX, y);
+                y += 13; doc.text(shop.email, marginX, y);
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+                doc.text('TAX INVOICE', pageW - marginX, 50, { align: 'right' });
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                doc.text('Invoice #: ' + inv.invoiceNo, pageW - marginX, 66, { align: 'right' });
+                doc.text('Invoice Date: ' + inv.date, pageW - marginX, 80, { align: 'right' });
+
+                y = Math.max(y, 80) + 20;
+                doc.setDrawColor(200); doc.line(marginX, y, pageW - marginX, y);
+                y += 20;
+
+                // ── Bill To ──
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+                doc.text('Bill To:', marginX, y);
+                doc.setFont('helvetica', 'normal');
+                y += 14; doc.text(inv.customerName, marginX, y);
+                y += 14; doc.text('Ph: ' + inv.mobile, marginX, y);
+
+                y += 25;
+                // ── Item table ──
+                var colX = { name: marginX, hsn: 300, qty: 350, rate: 390, amt: pageW - marginX };
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+                doc.text('Item', colX.name, y);
+                doc.text('HSN', colX.hsn, y);
+                doc.text('Qty', colX.qty, y);
+                doc.text('Rate', colX.rate, y);
+                doc.text('Amount', colX.amt, y, { align: 'right' });
+                y += 6; doc.line(marginX, y, pageW - marginX, y); y += 14;
+
+                doc.setFont('helvetica', 'normal');
+                inv.items.forEach(function(item) {
+                    var label = item.name + (item.imei ? '  IMEI: ' + item.imei : '');
+                    var lines = doc.splitTextToSize(label, 240);
+                    doc.text(lines, colX.name, y);
+                    doc.text(item.hsn || '-', colX.hsn, y);
+                    doc.text(String(item.qty), colX.qty, y);
+                    doc.text(item.price.toFixed(2), colX.rate, y);
+                    doc.text(item.amount.toFixed(2), colX.amt, y, { align: 'right' });
+                    y += Math.max(14, lines.length * 12);
+                });
+
+                y += 8; doc.line(marginX, y, pageW - marginX, y); y += 20;
+
+                // ── Totals ──
+                var gstAmt = inv.total - (inv.subtotal - inv.discount);
+                var half   = gstAmt / 2;
+                function totalsRow(label, value, bold) {
+                    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+                    doc.setFontSize(bold ? 11 : 9);
+                    doc.text(label, 380, y);
+                    doc.text(value, pageW - marginX, y, { align: 'right' });
+                    y += bold ? 16 : 13;
+                }
+                totalsRow('Subtotal:', '\u20B9' + inv.subtotal.toFixed(2));
+                if (inv.discount) totalsRow('Discount:', '-\u20B9' + inv.discount.toFixed(2));
+                if (inv.gstPct) {
+                    totalsRow('CGST ' + (inv.gstPct / 2) + '%:', '\u20B9' + half.toFixed(2));
+                    totalsRow('SGST ' + (inv.gstPct / 2) + '%:', '\u20B9' + half.toFixed(2));
+                }
+                totalsRow('Total:', '\u20B9' + inv.total.toFixed(2), true);
+
+                // ── Bank details ──
+                y += 20;
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+                doc.text('Bank Details:', marginX, y); y += 14;
+                doc.setFont('helvetica', 'normal');
+                doc.text('Bank: ' + shop.bankName, marginX, y); y += 12;
+                doc.text('Account #: ' + shop.bankAcct, marginX, y); y += 12;
+                doc.text('IFSC Code: ' + shop.bankIfsc, marginX, y); y += 12;
+                doc.text('Branch: ' + shop.bankBranch, marginX, y);
+
+                // ── Footer ──
+                y += 30;
+                doc.setFont('helvetica', 'italic'); doc.setFontSize(9);
+                doc.text('Thank you for the business.', marginX, y);
+                y += 18;
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+                doc.text('Terms and Conditions:', marginX, y); y += 11;
+                var termLines = doc.splitTextToSize(shop.terms, pageW - marginX * 2);
+                doc.text(termLines, marginX, y);
+
+                doc.save('Invoice-' + inv.invoiceNo + '.pdf');
+            } catch (e) {
+                self.showAlert('PDF generation failed: ' + e.message, 'danger');
+            }
         });
     },
 
