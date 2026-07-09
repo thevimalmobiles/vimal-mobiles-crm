@@ -94,11 +94,12 @@ router.get('/auth/whoami', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 router.get('/crm-data', (req, res) => {
   wrap(res, async () => {
-    const [invRows, custRows, repairRows, expRows] = await Promise.all([
+    const [invRows, custRows, repairRows, expRows, salesRows] = await Promise.all([
       sheetToObjects('Inventory'),
       sheetToObjects('Customers'),
       sheetToObjects('Repairs'),
       sheetToObjects('Expenses'),
+      sheetToObjects('Sales'),
     ]);
 
     const Inventory = invRows.map(r => ({
@@ -150,8 +151,18 @@ router.get('/crm-data', (req, res) => {
       notes:    r['Notes'],
     }));
 
+    const Sales = salesRows.map(r => ({
+      id:      str(r['Sale ID']),
+      date:    fmtDate(r['Date']),
+      name:    r['Item/Customer Name'],
+      type:    r['Type (Product/Repair)'],
+      revenue: r['Revenue'],
+      cost:    r['Cost'],
+      profit:  r['Profit'],
+    }));
+
     // Staff accounts don't see expense data, even via the API directly
-    return { Inventory, Customers, Repairs, Expenses: req.user.role === 'admin' ? Expenses : [] };
+    return { Inventory, Customers, Repairs, Expenses: req.user.role === 'admin' ? Expenses : [], Sales };
   });
 });
 
