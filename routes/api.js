@@ -121,12 +121,13 @@ router.get('/crm-data', (req, res) => {
     }));
 
     const Customers = custRows.map(r => ({
-      id:       str(r['Customer ID']),
-      name:     r['Customer Name'],
-      mobile:   str(r['Mobile Number']),
-      whatsapp: str(r['WhatsApp Number']),
-      history:  r['Purchase History'],
-      pending:  0,
+      id:          str(r['Customer ID']),
+      name:        r['Customer Name'],
+      mobile:      str(r['Mobile Number']),
+      whatsapp:    str(r['WhatsApp Number']),
+      history:     r['Purchase History'],
+      pending:     r['Pending Amount'] || 0,
+      description: r['Description'] || '',
     }));
 
     const Repairs = repairRows.map(r => ({
@@ -152,17 +153,20 @@ router.get('/crm-data', (req, res) => {
     }));
 
     const Sales = salesRows.map(r => ({
-      id:      str(r['Sale ID']),
-      date:    fmtDate(r['Date']),
-      name:    r['Item/Customer Name'],
-      type:    r['Type (Product/Repair)'],
-      revenue: r['Revenue'],
-      cost:    r['Cost'],
-      profit:  r['Profit'],
+      id:          str(r['Sale ID']),
+      date:        fmtDate(r['Date']),
+      name:        r['Item/Customer Name'],
+      type:        r['Type (Product/Repair)'],
+      revenue:     parseFloat(r['Revenue']) || 0,
+      cost:        parseFloat(r['Cost']) || 0,
+      profit:      parseFloat(r['Profit']) || 0,
+      paymentMode: r['Payment Mode'] || '',
+      cashAmount:  parseFloat(r['Cash Amount']) || 0,
+      upiAmount:   parseFloat(r['UPI Amount']) || 0,
     }));
 
     // Staff accounts don't see expense data, even via the API directly
-    return { Inventory, Customers, Repairs, Expenses: req.user.role === 'admin' ? Expenses : [], Sales };
+    return { Inventory, Customers, Repairs, Sales, Expenses: req.user.role === 'admin' ? Expenses : [] };
   });
 });
 
@@ -227,13 +231,22 @@ router.post('/customers/save', (req, res) => {
   wrap(res, async () => {
     const c = req.body;
     const id = c.mobile; // mobile number doubles as Customer ID
-    await upsertRow('Customers', id, {
-      'Customer ID':    id,
-      'Customer Name':  c.name,
-      'Mobile Number':  c.mobile,
-      'WhatsApp Number': c.whatsapp || c.mobile,
-      'Purchase History': 0,
-    });
+
+    // Preserve existing Purchase History / Pending Amount when editing;
+    // only overwrite them if the caller explicitly supplied a value.
+    const existing = (await sheetToObjects('Customers')).find(r => str(r['Mobile Number']) === str(id));
+
+    const fields = {
+      'Customer ID':       id,
+      'Customer Name':     c.name,
+      'Mobile Number':     c.mobile,
+      'WhatsApp Number':   c.whatsapp || c.mobile,
+      'Description':       c.description !== undefined ? c.description : (existing ? existing['Description'] : ''),
+    };
+    fields['Purchase History'] = c.history !== undefined ? c.history : (existing ? (existing['Purchase History'] || 0) : 0);
+    fields['Pending Amount']   = c.pending !== undefined ? c.pending : (existing ? (existing['Pending Amount'] || 0) : 0);
+
+    await upsertRow('Customers', id, fields);
     return { id };
   });
 });
@@ -297,6 +310,15 @@ router.post('/sales/record', (req, res) => {
   wrap(res, async () => {
     const payload = req.body;
     // { invoiceNo, customerName, mobile, total, items:[{productId,qty,sellingPrice}] }
+    if (!payload.invoiceNo) throw new Error('invoiceNo is required');
+
+    // Idempotency guard: if this exact Sale ID was already recorded (e.g. a
+    // duplicate/retried request, or a double-tap on "Complete Sale"), don't
+    // decrement stock or log the sale again — just report success.
+    const existingSales = await sheetToObjects('Sales');
+    if (existingSales.some(s => str(s['Sale ID']) === str(payload.invoiceNo))) {
+      return { success: true, duplicate: true };
+    }
 
     // Read current inventory
     const invRows = await sheetToObjects('Inventory');
@@ -321,6 +343,16 @@ router.post('/sales/record', (req, res) => {
     }
 
     const revenue = payload.total;
+    const paymentMode = payload.paymentMode || 'Cash';
+    // For a straight (non-split) payment, attribute the full amount to that
+    // mode's column so sheet formulas/pivots can sum Cash Amount / UPI Amount
+    // consistently whether or not the sale was split.
+    const cashAmount = paymentMode === 'Cash + UPI'
+      ? (parseFloat(payload.cashAmount) || 0)
+      : (paymentMode === 'Cash' ? revenue : 0);
+    const upiAmount = paymentMode === 'Cash + UPI'
+      ? (parseFloat(payload.upiAmount) || 0)
+      : (paymentMode === 'UPI / GPay' ? revenue : 0);
 
     // Log the sale
     await upsertRow('Sales', payload.invoiceNo, {
@@ -331,6 +363,9 @@ router.post('/sales/record', (req, res) => {
       'Revenue':              revenue,
       'Cost':                 totalCost,
       'Profit':               revenue - totalCost,
+      'Payment Mode':         paymentMode,
+      'Cash Amount':          cashAmount,
+      'UPI Amount':           upiAmount,
     });
 
     // Update or create customer row
