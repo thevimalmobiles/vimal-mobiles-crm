@@ -13,16 +13,14 @@ const path = require('path');
 
 // ── Auth ──────────────────────────────────────────────────────────────
 function getAuth() {
-  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-
-  credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
-
-  return new google.auth.GoogleAuth({
-    credentials,
+  const keyPath = path.resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './service-account-key.json');
+  const auth = new google.auth.GoogleAuth({
+    keyFile: keyPath,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
-
+  return auth;
 }
+
 function getSheetsClient() {
   return google.sheets({ version: 'v4', auth: getAuth() });
 }
@@ -32,8 +30,8 @@ const SHEET_ID = () => process.env.SHEET_ID;
 // ── Tab definitions (mirrors Code.gs TABS) ───────────────────────────
 const TABS = {
   Inventory: ['Product ID','Product Name','Category','Subcategory','Brand','Model','HSN Code','IMEI','Batch No','Cost Price','Selling Price','Stock','Supplier Name','Invoice No','Invoice Date'],
-  Customers: ['Customer ID','Customer Name','Mobile Number','WhatsApp Number','Purchase History'],
-  Sales:     ['Sale ID','Date','Item/Customer Name','Type (Product/Repair)','Revenue','Cost','Profit'],
+  Customers: ['Customer ID','Customer Name','Mobile Number','WhatsApp Number','Purchase History','Pending Amount','Description'],
+  Sales:     ['Sale ID','Date','Item/Customer Name','Type (Product/Repair)','Revenue','Cost','Profit','Payment Mode','Cash Amount','UPI Amount'],
   Repairs:   ['Repair ID','Date','Customer Name','Phone','Brand','Model','Issue','Part Used (Product ID)','Repair Charge','Technician Cost','Status'],
   Expenses:  ['Expense ID','Date','Category','Amount','Notes'],
   Users:     ['Username','Password Hash','Role','Display Name'],
@@ -69,18 +67,33 @@ async function ensureTab(sheets, tabName) {
       requestBody: { values: [TABS[tabName]] },
     });
   } else {
-    // Make sure header row exists
+    // Make sure header row exists, and matches the current expected TABS shape.
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID(),
       range: `${tabName}!A1:1`,
     });
-    if (!res.data.values || res.data.values.length === 0) {
+    const existingHeader = (res.data.values || [])[0] || [];
+    if (existingHeader.length === 0) {
       await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID(),
         range: `${tabName}!A1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [TABS[tabName]] },
       });
+    } else {
+      // Auto-migrate: append any columns defined in TABS that are missing
+      // from the sheet's current header (e.g. after a code update adds a
+      // new field). Existing columns and their data are left untouched.
+      const missing = TABS[tabName].filter(col => !existingHeader.includes(col));
+      if (missing.length > 0) {
+        const newHeader = [...existingHeader, ...missing];
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SHEET_ID(),
+          range: `${tabName}!A1`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [newHeader] },
+        });
+      }
     }
   }
 }
