@@ -108,7 +108,7 @@
                     <div class="col-md-3 col-sm-6"><div class="kpi-card success"><div class="kpi-title">Today's Sales</div><div class="kpi-value">&#8377;<span id="kpi-sales">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6 admin-only"><div class="kpi-card"><div class="kpi-title">Daily Profit</div><div class="kpi-value text-primary">&#8377;<span id="kpi-profit">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6"><div class="kpi-card warning"><div class="kpi-title">Service Income</div><div class="kpi-value">&#8377;<span id="kpi-service">0</span></div></div></div>
-                    <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-title">TG Sales</div><div class="kpi-value">&#8377;<span id="kpi-glass">0</span></div></div></div>
+                    <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-title">This Month's Sales</div><div class="kpi-value">&#8377;<span id="kpi-glass">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6 admin-only"><div class="kpi-card danger"><div class="kpi-title">Spare Parts Cost</div><div class="kpi-value">&#8377;<span id="kpi-spares">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6"><div class="kpi-card success"><div class="kpi-title">Active Repairs</div><div class="kpi-value"><span id="kpi-activerepairs">0</span></div></div></div>
                 </div>
@@ -151,7 +151,14 @@
                             <div class="cart-totals-row align-items-center"><span>Discount(&#8377;):</span><input type="number" class="form-control form-control-sm w-25 text-end" id="cart-discount" value="0" oninput="app.calculateCart()"></div>
                             <div class="cart-totals-row align-items-center"><span>GST(%):</span><select class="form-select form-select-sm w-25" id="cart-gst" onchange="app.calculateCart()"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option></select></div>
                             <div class="cart-totals-row grand"><span>Grand Total:</span><span>&#8377;<span id="cart-total">0</span></span></div>
-                            <select class="form-select mb-2" id="cart-payment-mode" onchange="app.toggleFinanceFields()"><option>Cash</option><option>UPI / GPay</option><option>Card</option><option value="Finance">Finance</option></select>
+                            <select class="form-select mb-2" id="cart-payment-mode" onchange="app.toggleFinanceFields()"><option>Cash</option><option>UPI / GPay</option><option>Card</option><option value="Cash + UPI">Cash + UPI (Split)</option><option value="Finance">Finance</option></select>
+                            <div id="pos-split-fields" class="bg-light p-2 rounded mb-2 hidden">
+                                <div class="d-flex gap-2 mb-1">
+                                    <input type="number" id="pos-split-cash" class="form-control form-control-sm" placeholder="Cash Amount" value="0" oninput="app.calculateCart()">
+                                    <input type="number" id="pos-split-upi" class="form-control form-control-sm" placeholder="UPI Amount" value="0" oninput="app.calculateCart()">
+                                </div>
+                                <small id="pos-split-remaining" class="text-muted">Remaining: &#8377;0.00</small>
+                            </div>
                             <div id="pos-finance-fields" class="bg-light p-2 rounded mb-2 hidden">
                                 <select id="pos-fin-partner" class="form-select form-select-sm mb-1"><option>DMI Finance</option><option>Samsung Finance+</option><option>Bajaj Finserv</option><option>TVS Credit</option></select>
                                 <input type="text" id="pos-fin-app-id" class="form-control form-control-sm mb-1" placeholder="Loan / App ID">
@@ -225,7 +232,7 @@
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle">
-                            <thead class="table-light"><tr><th>Name</th><th>Mobile</th><th>Total Purchases</th><th>Pending</th><th>Action</th></tr></thead>
+                            <thead class="table-light"><tr><th>Name</th><th>Mobile</th><th>Total Purchases</th><th>Pending</th><th>Description / Requirement</th><th>Action</th></tr></thead>
                             <tbody id="customers-tbody"></tbody>
                         </table>
                     </div>
@@ -320,6 +327,7 @@
             <div class="mb-3"><label>Full Name</label><input type="text" id="cust-name-input" class="form-control" placeholder="Enter full name"></div>
             <div class="mb-3"><label>Mobile Number</label><input type="text" id="cust-mobile-input" class="form-control" placeholder="9876543210"></div>
             <div class="mb-3"><label>Pending Amount (&#8377;)</label><input type="number" id="cust-pending-input" class="form-control" value="0"></div>
+            <div class="mb-3"><label>Description / Requirement</label><textarea id="cust-description-input" class="form-control" rows="2" placeholder="e.g. Looking for a budget 5G phone, follow up next week"></textarea></div>
         </div>
         <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="app.saveCustomer()">Save Customer</button></div>
     </div></div>
@@ -491,7 +499,19 @@ var api = {
         var opts = { method: method, headers: headers };
         if (body) opts.body = JSON.stringify(body);
         return fetch('/api' + path, opts).then(function(r) {
-            return r.json().then(function(json) { return { status: r.status, json: json }; });
+            return r.text().then(function(text) {
+                var json;
+                try {
+                    json = JSON.parse(text);
+                } catch (e) {
+                    // Server returned something that isn't JSON (an HTML error
+                    // page, a crash trace, etc.) — surface a clear message
+                    // instead of a cryptic "Unexpected token '<'" parse error.
+                    throw new Error('Server error (HTTP ' + r.status + '). The server may have crashed or ' +
+                        'its Google Sheets credentials may be missing/invalid — check the server logs.');
+                }
+                return { status: r.status, json: json };
+            });
         }).then(function(res) {
             if (!res.json.ok) {
                 if (res.status === 401 && path !== '/auth/login') {
@@ -544,7 +564,7 @@ var app = {
             }
             if (data.Customers) {
                 db.customers = data.Customers.map(function(c) {
-                    return { name: c.name || '', mobile: c.mobile || '', total: parseFloat(c.history || 0), pending: parseFloat(c.pending || 0) };
+                    return { name: c.name || '', mobile: c.mobile || '', total: parseFloat(c.history || 0), pending: parseFloat(c.pending || 0), description: c.description || '' };
                 });
             }
             if (data.Repairs) {
@@ -744,6 +764,7 @@ var app = {
         var salesList   = db.sales   || [];
         var repairsList = db.repairs || [];
         var todayStr = new Date().toISOString().slice(0, 10);
+        var monthPrefix = todayStr.slice(0, 7); // yyyy-MM
 
         var todaysSales   = salesList.filter(function(s){ return s.date === todayStr; });
         var todaysRepairs = repairsList.filter(function(r){ return r.date === todayStr; });
@@ -752,14 +773,14 @@ var app = {
         var salesProfit   = todaysSales.reduce(function(s,x){ return s + (parseFloat(x.profit)  || 0); }, 0);
         var sIncome = todaysRepairs.reduce(function(s,r){ return s + (parseFloat(r.service) || 0); }, 0);
         var spCost  = todaysRepairs.reduce(function(s,r){ return s + (parseFloat(r.spare)   || 0); }, 0);
+        var monthRevenue = salesList.filter(function(s){ return (s.date||'').slice(0,7) === monthPrefix; })
+                                     .reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
 
         // All these default to 0 until there's real data for today in the sheet.
         document.getElementById('kpi-sales').innerText = salesRevenue.toFixed(2);
         document.getElementById('kpi-profit').innerText = (salesProfit + sIncome).toFixed(2);
         document.getElementById('kpi-service').innerText = sIncome.toFixed(2);
-        // Tempered-glass sales aren't broken out per line-item in the Sales sheet
-        // yet (each sale is logged as one invoice row, not itemized) — 0 for now.
-        document.getElementById('kpi-glass').innerText = 0;
+        document.getElementById('kpi-glass').innerText = monthRevenue.toFixed(2);
         document.getElementById('kpi-spares').innerText = spCost.toFixed(2);
         document.getElementById('kpi-activerepairs').innerText = repairsList.filter(function(r){ return r.status !== 'Delivered'; }).length;
         this.drawCharts();
@@ -858,11 +879,22 @@ var app = {
         document.getElementById('cart-total').innerText    = total.toFixed(2);
         var dp = parseFloat(document.getElementById('pos-fin-downpayment').value) || 0;
         document.getElementById('pos-fin-loan-amount-text').innerText = Math.max(0, total - dp).toFixed(2);
+
+        if (document.getElementById('cart-payment-mode').value === 'Cash + UPI') {
+            var cashAmt = parseFloat(document.getElementById('pos-split-cash').value) || 0;
+            var upiAmt  = parseFloat(document.getElementById('pos-split-upi').value)  || 0;
+            var remaining = total - (cashAmt + upiAmt);
+            var remEl = document.getElementById('pos-split-remaining');
+            remEl.innerText = (remaining > 0 ? 'Remaining: ' : remaining < 0 ? 'Over by: ' : 'Fully covered: ') + '\u20b9' + Math.abs(remaining).toFixed(2);
+            remEl.className = Math.abs(remaining) < 0.01 ? 'text-success fw-bold' : 'text-danger fw-bold';
+        }
     },
 
     toggleFinanceFields: function() {
-        var show = document.getElementById('cart-payment-mode').value === 'Finance';
-        document.getElementById('pos-finance-fields').classList.toggle('hidden', !show);
+        var mode = document.getElementById('cart-payment-mode').value;
+        document.getElementById('pos-finance-fields').classList.toggle('hidden', mode !== 'Finance');
+        document.getElementById('pos-split-fields').classList.toggle('hidden', mode !== 'Cash + UPI');
+        if (mode === 'Cash + UPI') this.calculateCart();
     },
 
     completeSale: function() {
@@ -877,6 +909,17 @@ var app = {
         var discount = parseFloat(document.getElementById('cart-discount').value) || 0;
         var gstPct   = parseFloat(document.getElementById('cart-gst').value) || 0;
         var invNo    = 'VM' + String(Date.now()).slice(-6);
+
+        var paymentMode = document.getElementById('cart-payment-mode').value;
+        var cashAmount = 0, upiAmount = 0;
+        if (paymentMode === 'Cash + UPI') {
+            cashAmount = parseFloat(document.getElementById('pos-split-cash').value) || 0;
+            upiAmount  = parseFloat(document.getElementById('pos-split-upi').value)  || 0;
+            if (Math.abs((cashAmount + upiAmount) - total) > 0.01) {
+                this.showAlert('Cash + UPI amounts must add up to the Grand Total', 'warning');
+                return;
+            }
+        }
 
         // Snapshot HSN/IMEI per line item now, before stock/cart get mutated below
         var invoiceItems = this.cart.map(function(item) {
@@ -900,6 +943,9 @@ var app = {
             customerName: name,
             mobile:       mobile,
             total:        total,
+            paymentMode:  paymentMode,
+            cashAmount:   cashAmount,
+            upiAmount:    upiAmount,
             items:        this.cart.map(function(item){ return { productId: item.id, qty: item.qty, sellingPrice: item.price }; }),
         }).then(function() {
             // Update local db stock
@@ -915,6 +961,8 @@ var app = {
             self.cart = []; self.renderCart(); self.renderPOSProducts();
             document.getElementById('cart-customer-mobile').value = '';
             document.getElementById('cart-customer-name').value   = '';
+            document.getElementById('pos-split-cash').value = 0;
+            document.getElementById('pos-split-upi').value  = 0;
             self.showAlert('Sale complete! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2), 'success');
 
             self.generateInvoicePDF({
@@ -1342,7 +1390,7 @@ var app = {
         tbody.innerHTML = '';
         db.customers.forEach(function(c) {
             var m = String(c.mobile || '').replace(/\D/g, ''); if (m.length === 10) m = '91' + m;
-            tbody.innerHTML += '<tr><td><strong>'+c.name+'</strong></td><td>'+c.mobile+'</td><td class="fw-bold">&#8377;'+parseFloat(c.total).toFixed(2)+'</td><td class="'+(c.pending>0?'text-danger fw-bold':'text-success')+'">&#8377;'+c.pending+'</td><td><button class="btn btn-sm btn-outline-success" onclick="window.open(\'https://wa.me/'+m+'\',\'_blank\')"><i class="fab fa-whatsapp"></i></button></td></tr>';
+            tbody.innerHTML += '<tr><td><strong>'+c.name+'</strong></td><td>'+c.mobile+'</td><td class="fw-bold">&#8377;'+parseFloat(c.total).toFixed(2)+'</td><td class="'+(c.pending>0?'text-danger fw-bold':'text-success')+'">&#8377;'+c.pending+'</td><td class="small text-muted">'+(c.description||'&mdash;')+'</td><td><button class="btn btn-sm btn-outline-success" onclick="window.open(\'https://wa.me/'+m+'\',\'_blank\')"><i class="fab fa-whatsapp"></i></button></td></tr>';
         });
     },
 
@@ -1350,18 +1398,21 @@ var app = {
         var self   = this;
         var name   = document.getElementById('cust-name-input').value.trim();
         var mobile = document.getElementById('cust-mobile-input').value.trim();
+        var pending = parseFloat(document.getElementById('cust-pending-input').value) || 0;
+        var description = document.getElementById('cust-description-input').value.trim();
         if (!name || !mobile) { this.showAlert('Name and Mobile are required', 'warning'); return; }
         if (db.customers.find(function(c){ return c.mobile === mobile; })) { this.showAlert('Customer already exists', 'warning'); return; }
 
-        api.post('/customers/save', { name, mobile, whatsapp: mobile })
+        api.post('/customers/save', { name, mobile, whatsapp: mobile, pending: pending, description: description })
         .then(function() {
-            db.customers.push({ name, mobile, total: 0, pending: 0 });
+            db.customers.push({ name, mobile, total: 0, pending: pending, description: description });
             self.renderCustomers();
             self.showAlert('Customer registered!', 'success');
             bootstrap.Modal.getInstance(document.getElementById('customerModal')).hide();
             document.getElementById('cust-name-input').value   = '';
             document.getElementById('cust-mobile-input').value = '';
             document.getElementById('cust-pending-input').value = 0;
+            document.getElementById('cust-description-input').value = '';
         }).catch(function(err) { self.showAlert('Save failed: ' + err.message, 'danger'); });
     },
 
