@@ -13,12 +13,32 @@ const path = require('path');
 
 // ── Auth ──────────────────────────────────────────────────────────────
 function getAuth() {
+  // On Vercel (and anywhere a file can't be committed/uploaded), the key is
+  // pasted directly as JSON text into the GOOGLE_SERVICE_ACCOUNT_KEY env var.
+  // Locally, GOOGLE_SERVICE_ACCOUNT_KEY_PATH points at a downloaded key file.
+  const inlineKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (inlineKey) {
+    let credentials;
+    try {
+      credentials = JSON.parse(inlineKey);
+    } catch (err) {
+      throw new Error(
+        'GOOGLE_SERVICE_ACCOUNT_KEY is set but is not valid JSON. ' +
+        'Paste the ENTIRE contents of the downloaded service-account-key.json file ' +
+        '(including the { } braces) as the value of this environment variable.'
+      );
+    }
+    return new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+  }
+
   const keyPath = path.resolve(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || './service-account-key.json');
-  const auth = new google.auth.GoogleAuth({
+  return new google.auth.GoogleAuth({
     keyFile: keyPath,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
-  return auth;
 }
 
 function getSheetsClient() {
