@@ -41,12 +41,34 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // ── API routes ────────────────────────────────────────────────────────
 app.use('/api', apiRouter);
 
+// If a request under /api/* didn't match any route above, respond with JSON
+// (not the HTML catch-all below) so the frontend's res.json() never chokes
+// on an HTML page.
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, error: `No API route: ${req.method} ${req.originalUrl}` });
+});
+
 // ── Serve the frontend ────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Catch-all: serve index.html for any non-API route
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ── Global error handler ────────────────────────────────────────────────
+// Catches anything thrown/rejected outside an individual route's own
+// try/catch (e.g. a bad JSON body, a middleware crash) and guarantees a
+// JSON response for API calls instead of Express's default HTML error page —
+// which is what produces "Unexpected token '<' ... is not valid JSON" in
+// the browser.
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  if (req.path.startsWith('/api')) {
+    res.status(err.status || 500).json({ ok: false, error: err.message || 'Internal server error' });
+  } else {
+    res.status(err.status || 500).send('Internal server error');
+  }
 });
 
 // ── Startup validation ────────────────────────────────────────────────
