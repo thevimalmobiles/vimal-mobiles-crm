@@ -77,6 +77,12 @@
         <div class="sidebar-header">
             <h4><i class="fas fa-mobile-screen"></i> Vimal Mobiles</h4>
             <small id="user-role-badge" class="badge bg-primary mt-2">Admin</small>
+            <div class="mt-2">
+                <!-- Staff: fixed branch, shown read-only -->
+                <small id="branch-badge" class="badge bg-secondary hidden"></small>
+                <!-- Admin: can switch between branches -->
+                <select id="branch-switcher" class="form-select form-select-sm hidden" onchange="app.switchBranch(this.value)"></select>
+            </div>
         </div>
         <ul id="nav-menu">
             <li class="nav-item active"><a href="#" onclick="app.showView('dashboard',this)"><i class="fas fa-chart-line"></i> Dashboard</a></li>
@@ -96,6 +102,7 @@
             <button class="btn btn-light d-md-none" onclick="document.getElementById('sidebar').classList.toggle('active')"><i class="fas fa-bars"></i></button>
             <h5 class="m-0" id="topbar-title">Dashboard</h5>
             <div class="d-flex align-items-center">
+                <span id="topbar-branch" class="badge bg-primary me-3"><i class="fas fa-store me-1"></i><span id="topbar-branch-name"></span></span>
                 <i class="fas fa-user-circle fs-4 me-2 text-secondary"></i>
                 <span id="topbar-username" class="fw-bold">User</span>
             </div>
@@ -496,6 +503,7 @@ var api = {
         var headers = { 'Content-Type': 'application/json' };
         var token = localStorage.getItem('vm_token');
         if (token) headers['Authorization'] = 'Bearer ' + token;
+        if (app.currentBranch) headers['X-Branch'] = app.currentBranch;
         var opts = { method: method, headers: headers };
         if (body) opts.body = JSON.stringify(body);
         return fetch('/api' + path, opts).then(function(r) {
@@ -674,7 +682,7 @@ var app = {
         btn.disabled = true; btn.innerText = 'Logging in…';
         api.post('/auth/login', { username: u, password: p }).then(function(res) {
             localStorage.setItem('vm_token', res.token);
-            self.user = { username: u, role: res.role, name: res.name };
+            self.user = { username: u, role: res.role, name: res.name, branch: res.branch };
             self.enterApp();
         }).catch(function(err) {
             errEl.innerText = err.message || 'Login failed';
@@ -684,18 +692,65 @@ var app = {
         });
     },
 
+    // ── Branch (multi-branch: Sithalapakkam / Arasankazhani) ───────────
+    // Staff accounts are pinned to one branch (from their login). Admin
+    // accounts pick a branch here and can switch anytime from the sidebar;
+    // every API call after this point carries the choice as an X-Branch header.
+    setupBranch: function() {
+        var self = this;
+        var badge = document.getElementById('branch-badge');
+        var switcher = document.getElementById('branch-switcher');
+
+        if (this.user.role !== 'admin') {
+            // Staff: fixed, read-only branch badge — no switcher.
+            this.currentBranch = this.user.branch;
+            badge.innerText = this.user.branch || 'No branch assigned';
+            badge.classList.remove('hidden');
+            switcher.classList.add('hidden');
+            document.getElementById('topbar-branch-name').innerText = this.user.branch || '—';
+            return Promise.resolve();
+        }
+
+        // Admin: populate the switcher from the server's known branch list.
+        badge.classList.add('hidden');
+        switcher.classList.remove('hidden');
+        return api.get('/branches').then(function(branches) {
+            switcher.innerHTML = branches.map(function(b) { return '<option value="' + b + '">' + b + '</option>'; }).join('');
+            var saved = localStorage.getItem('vm_branch');
+            var initial = (saved && branches.indexOf(saved) !== -1) ? saved : branches[0];
+            switcher.value = initial;
+            self.currentBranch = initial;
+            localStorage.setItem('vm_branch', initial);
+            document.getElementById('topbar-branch-name').innerText = initial;
+        }).catch(function(err) {
+            self.showAlert('Could not load branch list: ' + err.message, 'danger');
+        });
+    },
+
+    switchBranch: function(branch) {
+        this.currentBranch = branch;
+        localStorage.setItem('vm_branch', branch);
+        document.getElementById('topbar-branch-name').innerText = branch;
+        this.showAlert('Switched to ' + branch, 'info');
+        this.showView('dashboard', document.querySelector('#nav-menu li a'));
+        this.loadFromServer();
+    },
+
     enterApp: function() {
+        var self = this;
         document.getElementById('login-view').classList.add('hidden');
         document.getElementById('main-app').classList.remove('hidden');
         document.getElementById('topbar-username').innerText = this.user.name;
         document.getElementById('user-role-badge').innerText = this.user.role === 'admin' ? 'Admin' : 'Staff';
         this.applyRolePermissions();
-        this.showView('dashboard', null);
-        this.loadFromServer();
+        this.setupBranch().then(function() {
+            self.showView('dashboard', null);
+            self.loadFromServer();
+        });
     },
 
     logout: function(silent) {
-        this.user = null; this.cart = [];
+        this.user = null; this.cart = []; this.currentBranch = null;
         localStorage.removeItem('vm_token');
         this.showLoginView();
         document.getElementById('username').value = '';
@@ -710,7 +765,8 @@ var app = {
         sel.innerHTML = '<option>Loading…</option>';
         api.get('/auth/users').then(function(users) {
             sel.innerHTML = users.map(function(u) {
-                return '<option value="' + u.username + '">' + u.username + ' (' + u.role + ')</option>';
+                var branchLabel = u.role === 'admin' ? 'all branches' : (u.branch || 'no branch');
+                return '<option value="' + u.username + '">' + u.username + ' (' + u.role + ' — ' + branchLabel + ')</option>';
             }).join('');
         }).catch(function(err) {
             sel.innerHTML = '<option>Failed to load</option>';
