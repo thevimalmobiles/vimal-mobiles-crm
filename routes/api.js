@@ -4,8 +4,15 @@
  * Express router that exposes one POST endpoint per Apps Script function.
  * Each handler is the direct equivalent of the corresponding function in Code.gs.
  *
+ * MULTI-BRANCH: every data route below runs behind requireBranch, which
+ * resolves req.branch (the staff member's fixed branch, or the branch an
+ * admin picked via the X-Branch header) and every sheets.js call is scoped
+ * to that branch's own spreadsheet. The Users/login tab is the one
+ * exception — it lives on the shared MASTER sheet, not per-branch.
+ *
  * Endpoints
  * ─────────
+ * GET  /api/branches            → list of known branch names
  * GET  /api/crm-data            → getCRMData()
  * POST /api/inventory/save      → saveInventoryItem()
  * POST /api/inventory/delete    → deleteInventoryItem()
@@ -17,8 +24,8 @@
 
 const express = require('express');
 const router  = express.Router();
-const { sheetToObjects, upsertRow, deleteRowById, getLastRow, CATEGORIES, today } = require('../sheets');
-const { login, changePassword, requireAuth, requireAdmin } = require('../auth');
+const { sheetToObjects, upsertRow, deleteRowById, getLastRow, CATEGORIES, today, branchNames } = require('../sheets');
+const { login, changePassword, requireAuth, requireAdmin, requireBranch } = require('../auth');
 
 // ── Helpers ───────────────────────────────────────────────────────────
 function str(v) {
@@ -58,12 +65,17 @@ router.post('/auth/login', (req, res) => {
       err.status = 401;
       throw err;
     }
-    return result; // { token, role, name }
+    return result; // { token, role, name, branch }
   });
 });
 
 // Everything below this line requires a valid logged-in session
 router.use(requireAuth);
+
+// GET /api/branches — list of known branch names, for the admin branch switcher
+router.get('/branches', (req, res) => {
+  res.json({ ok: true, data: branchNames() });
+});
 
 // POST /api/auth/change-password  (admin only, can change ANY user's password)
 router.post('/auth/change-password', requireAdmin, (req, res) => {
@@ -79,27 +91,36 @@ router.post('/auth/change-password', requireAdmin, (req, res) => {
 // GET /api/auth/users  (admin only — list accounts so passwords can be changed)
 router.get('/auth/users', requireAdmin, (req, res) => {
   wrap(res, async () => {
-    const users = await sheetToObjects('Users');
-    return users.map(u => ({ username: u['Username'], role: u['Role'], name: u['Display Name'] }));
+    const { MASTER_SHEET_ID } = require('../sheets');
+    const users = await sheetToObjects('Users', MASTER_SHEET_ID());
+    return users.map(u => ({ username: u['Username'], role: u['Role'], name: u['Display Name'], branch: u['Branch'] || '' }));
   });
 });
 
 // GET /api/auth/whoami  (used by the frontend to restore a session on refresh)
 router.get('/auth/whoami', (req, res) => {
-  res.json({ ok: true, data: { username: req.user.username, role: req.user.role, name: req.user.name } });
+  res.json({ ok: true, data: { username: req.user.username, role: req.user.role, name: req.user.name, branch: req.user.branch } });
 });
+
+// Every route below deals with branch-scoped operational data, so resolve
+// req.branch (staff: fixed; admin: from X-Branch header) before any of them run.
+router.use(requireBranch);
 
 // ══════════════════════════════════════════════════════════════════════
 // GET /api/crm-data  →  getCRMData()
 // ══════════════════════════════════════════════════════════════════════
 router.get('/crm-data', (req, res) => {
   wrap(res, async () => {
+    const sheetId = req.branch; // resolved to an actual ID just below
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
+
     const [invRows, custRows, repairRows, expRows, salesRows] = await Promise.all([
-      sheetToObjects('Inventory'),
-      sheetToObjects('Customers'),
-      sheetToObjects('Repairs'),
-      sheetToObjects('Expenses'),
-      sheetToObjects('Sales'),
+      sheetToObjects('Inventory', spreadsheetId),
+      sheetToObjects('Customers', spreadsheetId),
+      sheetToObjects('Repairs', spreadsheetId),
+      sheetToObjects('Expenses', spreadsheetId),
+      sheetToObjects('Sales', spreadsheetId),
     ]);
 
     const Inventory = invRows.map(r => ({
@@ -166,7 +187,7 @@ router.get('/crm-data', (req, res) => {
     }));
 
     // Staff accounts don't see expense data, even via the API directly
-    return { Inventory, Customers, Repairs, Sales, Expenses: req.user.role === 'admin' ? Expenses : [] };
+    return { branch: req.branch, Inventory, Customers, Repairs, Sales, Expenses: req.user.role === 'admin' ? Expenses : [] };
   });
 });
 
@@ -175,6 +196,8 @@ router.get('/crm-data', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 router.post('/inventory/save', (req, res) => {
   wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
     const p = req.body;
 
     // Mobiles: each physical phone is its own row, ID'd by its unique IMEI
@@ -208,7 +231,7 @@ router.post('/inventory/save', (req, res) => {
       'Supplier Name': p.supplier || '',
       'Invoice No':    p.invoiceNo || '',
       'Invoice Date':  p.invoiceDate || '',
-    });
+    }, spreadsheetId);
     return { id };
   });
 });
@@ -218,8 +241,10 @@ router.post('/inventory/save', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 router.post('/inventory/delete', (req, res) => {
   wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
     const { id } = req.body;
-    await deleteRowById('Inventory', id);
+    await deleteRowById('Inventory', id, spreadsheetId);
     return { deleted: id };
   });
 });
@@ -229,12 +254,14 @@ router.post('/inventory/delete', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 router.post('/customers/save', (req, res) => {
   wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
     const c = req.body;
     const id = c.mobile; // mobile number doubles as Customer ID
 
     // Preserve existing Purchase History / Pending Amount when editing;
     // only overwrite them if the caller explicitly supplied a value.
-    const existing = (await sheetToObjects('Customers')).find(r => str(r['Mobile Number']) === str(id));
+    const existing = (await sheetToObjects('Customers', spreadsheetId)).find(r => str(r['Mobile Number']) === str(id));
 
     const fields = {
       'Customer ID':       id,
@@ -246,7 +273,7 @@ router.post('/customers/save', (req, res) => {
     fields['Purchase History'] = c.history !== undefined ? c.history : (existing ? (existing['Purchase History'] || 0) : 0);
     fields['Pending Amount']   = c.pending !== undefined ? c.pending : (existing ? (existing['Pending Amount'] || 0) : 0);
 
-    await upsertRow('Customers', id, fields);
+    await upsertRow('Customers', id, fields, spreadsheetId);
     return { id };
   });
 });
@@ -256,6 +283,8 @@ router.post('/customers/save', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 router.post('/repairs/save', (req, res) => {
   wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
     const r = req.body;
     let jobCard = r.id; // present when editing existing job card
 
@@ -272,13 +301,13 @@ router.post('/repairs/save', (req, res) => {
     };
 
     if (!jobCard) {
-      const nextNum = await getLastRow('Repairs'); // header = row 1
+      const nextNum = await getLastRow('Repairs', spreadsheetId); // header = row 1
       jobCard = 'JOB' + String(nextNum).padStart(3, '0');
       fields['Repair ID'] = jobCard;
       fields['Date']      = today();
     }
 
-    await upsertRow('Repairs', jobCard, fields);
+    await upsertRow('Repairs', jobCard, fields, spreadsheetId);
     return { id: jobCard };
   });
 });
@@ -288,6 +317,8 @@ router.post('/repairs/save', (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 router.post('/expenses/add', requireAdmin, (req, res) => {
   wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
     const e = req.body;
     const id = 'E' + String(Date.now()).slice(-6);
     await upsertRow('Expenses', id, {
@@ -296,7 +327,7 @@ router.post('/expenses/add', requireAdmin, (req, res) => {
       'Category':   e.category,
       'Amount':     e.amount,
       'Notes':      e.notes,
-    });
+    }, spreadsheetId);
     return { id };
   });
 });
@@ -308,6 +339,8 @@ router.post('/expenses/add', requireAdmin, (req, res) => {
 // ══════════════════════════════════════════════════════════════════════
 router.post('/sales/record', (req, res) => {
   wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
     const payload = req.body;
     // { invoiceNo, customerName, mobile, total, items:[{productId,qty,sellingPrice}] }
     if (!payload.invoiceNo) throw new Error('invoiceNo is required');
@@ -315,13 +348,13 @@ router.post('/sales/record', (req, res) => {
     // Idempotency guard: if this exact Sale ID was already recorded (e.g. a
     // duplicate/retried request, or a double-tap on "Complete Sale"), don't
     // decrement stock or log the sale again — just report success.
-    const existingSales = await sheetToObjects('Sales');
+    const existingSales = await sheetToObjects('Sales', spreadsheetId);
     if (existingSales.some(s => str(s['Sale ID']) === str(payload.invoiceNo))) {
       return { success: true, duplicate: true };
     }
 
     // Read current inventory
-    const invRows = await sheetToObjects('Inventory');
+    const invRows = await sheetToObjects('Inventory', spreadsheetId);
     let totalCost = 0;
 
     // For each item, compute cost and decrement stock
@@ -338,7 +371,7 @@ router.post('/sales/record', (req, res) => {
           'Cost Price':    prod['Cost Price'],
           'Selling Price': prod['Selling Price'],
           'Stock':         currentStock - item.qty,
-        });
+        }, spreadsheetId);
       }
     }
 
@@ -366,10 +399,10 @@ router.post('/sales/record', (req, res) => {
       'Payment Mode':         paymentMode,
       'Cash Amount':          cashAmount,
       'UPI Amount':           upiAmount,
-    });
+    }, spreadsheetId);
 
     // Update or create customer row
-    const custRows = await sheetToObjects('Customers');
+    const custRows = await sheetToObjects('Customers', spreadsheetId);
     const existing = custRows.find(c => str(c['Mobile Number']) === str(payload.mobile));
     const prevHistory = existing ? (parseFloat(existing['Purchase History']) || 0) : 0;
 
@@ -379,7 +412,7 @@ router.post('/sales/record', (req, res) => {
       'Mobile Number':    str(payload.mobile),
       'WhatsApp Number':  str(payload.mobile),
       'Purchase History': prevHistory + revenue,
-    });
+    }, spreadsheetId);
 
     return { success: true };
   });
