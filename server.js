@@ -38,6 +38,36 @@ app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// ── TEMPORARY DIAGNOSTIC ROUTE — remove once the Sheet ID issue is resolved ──
+// Reports exactly what this running deployment currently has in memory for
+// the Sheet ID env vars (masked) and whether the Google Sheets API call
+// actually succeeds — so there's no more guessing about redeploy timing.
+app.get('/api/_debug/sheet-config', async (req, res) => {
+  function mask(v) {
+    if (!v) return { present: false };
+    const s = String(v);
+    return { present: true, length: s.length, preview: s.length > 10 ? s.slice(0, 5) + '...' + s.slice(-5) : s };
+  }
+  const result = {
+    SHEET_ID: mask(process.env.SHEET_ID),
+    SHEET_ID_SITHALAPAKKAM: mask(process.env.SHEET_ID_SITHALAPAKKAM),
+    SHEET_ID_ARASANKAZHANI: mask(process.env.SHEET_ID_ARASANKAZHANI),
+    GOOGLE_SERVICE_ACCOUNT_KEY_present: !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY,
+  };
+  try {
+    const { sheetToObjects, MASTER_SHEET_ID } = require('./sheets');
+    const sheetId = MASTER_SHEET_ID();
+    result.resolvedMasterSheetId = mask(sheetId);
+    const users = await sheetToObjects('Users', sheetId);
+    result.googleApiCallSucceeded = true;
+    result.usersFoundInSheet = users.length;
+  } catch (err) {
+    result.googleApiCallSucceeded = false;
+    result.googleApiError = err.message;
+  }
+  res.json(result);
+});
+
 // ── API routes ────────────────────────────────────────────────────────
 app.use('/api', apiRouter);
 
