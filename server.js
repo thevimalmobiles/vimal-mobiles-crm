@@ -75,6 +75,17 @@ app.use((err, req, res, next) => {
 function validateConfig() {
   const errors = [];
 
+  function logSheetIdDiagnostic(label, value) {
+    if (!value) { console.log(`   ${label}: (not set)`); return; }
+    const masked = value.length > 10 ? value.slice(0, 5) + '...' + value.slice(-5) : value;
+    console.log(`   ${label}: "${masked}" (length ${value.length})`);
+  }
+
+  console.log('🔎 Sheet ID diagnostic (compare against your actual Google Sheet URLs):');
+  logSheetIdDiagnostic('SHEET_ID', process.env.SHEET_ID);
+  logSheetIdDiagnostic('SHEET_ID_SITHALAPAKKAM', process.env.SHEET_ID_SITHALAPAKKAM);
+  logSheetIdDiagnostic('SHEET_ID_ARASANKAZHANI', process.env.SHEET_ID_ARASANKAZHANI);
+
   if (!process.env.SHEET_ID) {
     errors.push('SHEET_ID (master sheet, holds the shared Users/login tab) is not set in .env');
   }
