@@ -24,7 +24,7 @@
 
 const express = require('express');
 const router  = express.Router();
-const { sheetToObjects, upsertRow, deleteRowById, getLastRow, CATEGORIES, today, branchNames } = require('../sheets');
+const { sheetToObjects, upsertRow, deleteRowById, getLastRow, CATEGORIES, today, branchNames, invoicePrefixFor } = require('../sheets');
 const { login, changePassword, requireAuth, requireAdmin, requireBranch } = require('../auth');
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -177,6 +177,7 @@ router.get('/crm-data', (req, res) => {
       id:          str(r['Sale ID']),
       date:        fmtDate(r['Date']),
       name:        r['Item/Customer Name'],
+      mobile:      str(r['Customer Mobile'] || ''),
       type:        r['Type (Product/Repair)'],
       revenue:     parseFloat(r['Revenue']) || 0,
       cost:        parseFloat(r['Cost']) || 0,
@@ -184,6 +185,8 @@ router.get('/crm-data', (req, res) => {
       paymentMode: r['Payment Mode'] || '',
       cashAmount:  parseFloat(r['Cash Amount']) || 0,
       upiAmount:   parseFloat(r['UPI Amount']) || 0,
+      invoiceNo:   r['Invoice No'] || '',
+      status:      r['Status'] || 'Completed',
     }));
 
     // Staff accounts don't see expense data, even via the API directly
@@ -357,7 +360,8 @@ router.post('/sales/record', (req, res) => {
     const invRows = await sheetToObjects('Inventory', spreadsheetId);
     let totalCost = 0;
 
-    // For each item, compute cost and decrement stock
+    // For each item, compute cost, decrement stock, and log a line-item
+    // record (SaleItems) so a future refund can restock exactly what was sold.
     for (const item of payload.items) {
       const prod = invRows.find(r => str(r['Product ID']) === str(item.productId));
       if (prod) {
@@ -373,6 +377,15 @@ router.post('/sales/record', (req, res) => {
           'Stock':         currentStock - item.qty,
         }, spreadsheetId);
       }
+      await upsertRow('SaleItems', payload.invoiceNo + '-' + item.productId, {
+        'Row ID':      payload.invoiceNo + '-' + item.productId,
+        'Sale ID':     payload.invoiceNo,
+        'Product ID':  str(item.productId),
+        'Product Name':prod ? prod['Product Name'] : '',
+        'Qty':         item.qty,
+        'Price':       item.sellingPrice,
+        'Amount':      item.qty * item.sellingPrice,
+      }, spreadsheetId);
     }
 
     const revenue = payload.total;
@@ -387,11 +400,18 @@ router.post('/sales/record', (req, res) => {
       ? (parseFloat(payload.upiAmount) || 0)
       : (paymentMode === 'UPI / GPay' ? revenue : 0);
 
+    // Sequential, GST-friendly invoice number (e.g. "STK-000042") — separate
+    // from the internal Sale ID used above for idempotency. Counted from
+    // existing rows in this branch's own Sales sheet, so numbering never
+    // has gaps and never collides with the other branch's numbering.
+    const invoiceNo = invoicePrefixFor(req.branch) + '-' + String(existingSales.length + 1).padStart(6, '0');
+
     // Log the sale
     await upsertRow('Sales', payload.invoiceNo, {
       'Sale ID':              payload.invoiceNo,
       'Date':                 today(),
       'Item/Customer Name':   payload.customerName,
+      'Customer Mobile':      str(payload.mobile || ''),
       'Type (Product/Repair)':'Product',
       'Revenue':              revenue,
       'Cost':                 totalCost,
@@ -399,6 +419,8 @@ router.post('/sales/record', (req, res) => {
       'Payment Mode':         paymentMode,
       'Cash Amount':          cashAmount,
       'UPI Amount':           upiAmount,
+      'Invoice No':           invoiceNo,
+      'Status':               'Completed',
     }, spreadsheetId);
 
     // Update or create customer row
@@ -414,7 +436,89 @@ router.post('/sales/record', (req, res) => {
       'Purchase History': prevHistory + revenue,
     }, spreadsheetId);
 
-    return { success: true };
+    return { success: true, invoiceNo };
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// POST /api/sales/refund  →  reverse a completed sale
+// Marks the Sales row as Refunded, restocks every item from that sale's
+// SaleItems log, and subtracts the amount back off the customer's
+// Purchase History. Admin only — refunds affect money and stock, so this
+// shouldn't be a one-tap action for staff.
+// ══════════════════════════════════════════════════════════════════════
+router.post('/sales/refund', requireAdmin, (req, res) => {
+  wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
+    const { saleId } = req.body;
+    if (!saleId) throw new Error('saleId is required');
+
+    const salesRows = await sheetToObjects('Sales', spreadsheetId);
+    const sale = salesRows.find(s => str(s['Sale ID']) === str(saleId));
+    if (!sale) throw new Error('Sale not found: ' + saleId);
+    if (sale['Status'] === 'Refunded') throw new Error('This sale was already refunded');
+
+    // Restock every item that was part of this sale, using the SaleItems log
+    // written at the time of sale — this is why that log exists.
+    const [itemRows, invRows] = await Promise.all([
+      sheetToObjects('SaleItems', spreadsheetId),
+      sheetToObjects('Inventory', spreadsheetId),
+    ]);
+    const soldItems = itemRows.filter(i => str(i['Sale ID']) === str(saleId));
+    for (const item of soldItems) {
+      const prod = invRows.find(r => str(r['Product ID']) === str(item['Product ID']));
+      if (prod) {
+        const currentStock = parseFloat(prod['Stock']) || 0;
+        const qty = parseFloat(item['Qty']) || 0;
+        await upsertRow('Inventory', str(prod['Product ID']), {
+          'Product ID':    str(prod['Product ID']),
+          'Product Name':  prod['Product Name'],
+          'Category':      prod['Category'],
+          'Cost Price':    prod['Cost Price'],
+          'Selling Price': prod['Selling Price'],
+          'Stock':         currentStock + qty,
+        }, spreadsheetId);
+      }
+    }
+
+    // Mark the sale itself as refunded (kept in the sheet for audit trail,
+    // just excluded from active revenue/profit totals by its Status).
+    await upsertRow('Sales', saleId, {
+      'Sale ID':              sale['Sale ID'],
+      'Date':                 sale['Date'],
+      'Item/Customer Name':   sale['Item/Customer Name'],
+      'Customer Mobile':      sale['Customer Mobile'],
+      'Type (Product/Repair)':sale['Type (Product/Repair)'],
+      'Revenue':              sale['Revenue'],
+      'Cost':                 sale['Cost'],
+      'Profit':               sale['Profit'],
+      'Payment Mode':         sale['Payment Mode'],
+      'Cash Amount':          sale['Cash Amount'],
+      'UPI Amount':           sale['UPI Amount'],
+      'Invoice No':           sale['Invoice No'],
+      'Status':               'Refunded',
+    }, spreadsheetId);
+
+    // Subtract the refunded amount back off the customer's running total.
+    const mobile = sale['Customer Mobile'];
+    if (mobile) {
+      const custRows = await sheetToObjects('Customers', spreadsheetId);
+      const cust = custRows.find(c => str(c['Mobile Number']) === str(mobile));
+      if (cust) {
+        const prevHistory = parseFloat(cust['Purchase History']) || 0;
+        const revenue = parseFloat(sale['Revenue']) || 0;
+        await upsertRow('Customers', str(mobile), {
+          'Customer ID':    cust['Customer ID'],
+          'Customer Name':  cust['Customer Name'],
+          'Mobile Number':  cust['Mobile Number'],
+          'WhatsApp Number':cust['WhatsApp Number'],
+          'Purchase History': Math.max(0, prevHistory - revenue),
+        }, spreadsheetId);
+      }
+    }
+
+    return { success: true, restockedItems: soldItems.length };
   });
 });
 
