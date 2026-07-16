@@ -83,6 +83,17 @@ function branchNames() {
   return Object.keys(BRANCHES);
 }
 
+// Short prefix used in sequential invoice numbers (e.g. "STK-000042"), so
+// invoices are readable and each branch's numbering never collides with
+// the other's even though they're generated from two separate sheets.
+const BRANCH_INVOICE_PREFIX = {
+  Sithalapakkam: 'STK',
+  Arasankazhani: 'ARK',
+};
+function invoicePrefixFor(branch) {
+  return BRANCH_INVOICE_PREFIX[branch] || String(branch || 'BR').slice(0, 3).toUpperCase();
+}
+
 // Resolve a branch name to its spreadsheet ID, with a clear error if the
 // branch is unknown or its env var isn't configured yet.
 function resolveBranchSheetId(branch) {
@@ -98,7 +109,8 @@ function resolveBranchSheetId(branch) {
 const TABS = {
   Inventory: ['Product ID','Product Name','Category','Subcategory','Brand','Model','HSN Code','IMEI','Batch No','Cost Price','Selling Price','Stock','Supplier Name','Invoice No','Invoice Date'],
   Customers: ['Customer ID','Customer Name','Mobile Number','WhatsApp Number','Purchase History','Pending Amount','Description'],
-  Sales:     ['Sale ID','Date','Item/Customer Name','Type (Product/Repair)','Revenue','Cost','Profit','Payment Mode','Cash Amount','UPI Amount'],
+  Sales:     ['Sale ID','Date','Item/Customer Name','Customer Mobile','Type (Product/Repair)','Revenue','Cost','Profit','Payment Mode','Cash Amount','UPI Amount','Invoice No','Status'],
+  SaleItems: ['Row ID','Sale ID','Product ID','Product Name','Qty','Price','Amount'],
   Repairs:   ['Repair ID','Date','Customer Name','Phone','Brand','Model','Issue','Part Used (Product ID)','Repair Charge','Technician Cost','Status'],
   Expenses:  ['Expense ID','Date','Category','Amount','Notes'],
   Users:     ['Username','Password Hash','Role','Display Name','Branch'],
@@ -299,5 +311,5 @@ function today() {
 
 module.exports = {
   sheetToObjects, upsertRow, deleteRowById, getLastRow, TABS, CATEGORIES, today,
-  MASTER_SHEET_ID, resolveBranchSheetId, branchNames,
+  MASTER_SHEET_ID, resolveBranchSheetId, branchNames, invoicePrefixFor,
 };
