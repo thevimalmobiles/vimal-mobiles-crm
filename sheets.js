@@ -53,16 +53,30 @@ function getSheetsClient() {
 }
 
 // ── Branches ──────────────────────────────────────────────────────────
+// Clean up a Sheet ID env var: trims whitespace/newlines and strips
+// accidental wrapping quotes — both are common copy-paste mistakes when
+// pasting into a hosting provider's environment variable UI, and Google's
+// API returns a generic "Requested entity was not found" for a mangled ID
+// rather than a clear "invalid format" error, so this is worth guarding.
+function cleanId(raw) {
+  if (!raw) return raw;
+  let id = String(raw).trim();
+  if ((id.startsWith('"') && id.endsWith('"')) || (id.startsWith("'") && id.endsWith("'"))) {
+    id = id.slice(1, -1).trim();
+  }
+  return id;
+}
+
 // MASTER_SHEET_ID: the original single sheet — now used ONLY for the
 // shared Users/login tab (one login list for both branches' staff+admin).
-const MASTER_SHEET_ID = () => process.env.SHEET_ID;
+const MASTER_SHEET_ID = () => cleanId(process.env.SHEET_ID);
 
 // Each branch has its own fully separate spreadsheet (own Inventory,
 // Customers, Sales, Repairs, Expenses tabs). Add more entries here if a
 // third branch opens later — no other code changes needed.
 const BRANCHES = {
-  Sithalapakkam: () => process.env.SHEET_ID_SITHALAPAKKAM,
-  Arasankazhani: () => process.env.SHEET_ID_ARASANKAZHANI,
+  Sithalapakkam: () => cleanId(process.env.SHEET_ID_SITHALAPAKKAM),
+  Arasankazhani: () => cleanId(process.env.SHEET_ID_ARASANKAZHANI),
 };
 
 function branchNames() {
