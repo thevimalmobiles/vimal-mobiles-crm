@@ -5,6 +5,13 @@
  * upsertRow_, deleteRowById_, etc.) with equivalent logic via the
  * googleapis Node.js client.
  *
+ * MULTI-BRANCH: this shop runs two physical branches, each backed by its
+ * own Google Sheet (own Inventory/Customers/Sales/Repairs/Expenses tabs).
+ * Every operational function below takes an explicit `spreadsheetId` so
+ * the caller (routes/api.js) decides which branch's sheet to read/write —
+ * this module has no built-in notion of "the" sheet anymore, except for
+ * the one MASTER sheet that holds the shared Users/login tab.
+ *
  * All functions are async and return plain JS objects/arrays.
  */
 
@@ -45,7 +52,33 @@ function getSheetsClient() {
   return google.sheets({ version: 'v4', auth: getAuth() });
 }
 
-const SHEET_ID = () => process.env.SHEET_ID;
+// ── Branches ──────────────────────────────────────────────────────────
+// MASTER_SHEET_ID: the original single sheet — now used ONLY for the
+// shared Users/login tab (one login list for both branches' staff+admin).
+const MASTER_SHEET_ID = () => process.env.SHEET_ID;
+
+// Each branch has its own fully separate spreadsheet (own Inventory,
+// Customers, Sales, Repairs, Expenses tabs). Add more entries here if a
+// third branch opens later — no other code changes needed.
+const BRANCHES = {
+  Sithalapakkam: () => process.env.SHEET_ID_SITHALAPAKKAM,
+  Arasankazhani: () => process.env.SHEET_ID_ARASANKAZHANI,
+};
+
+function branchNames() {
+  return Object.keys(BRANCHES);
+}
+
+// Resolve a branch name to its spreadsheet ID, with a clear error if the
+// branch is unknown or its env var isn't configured yet.
+function resolveBranchSheetId(branch) {
+  if (!branch) throw new Error('No branch specified');
+  const getter = BRANCHES[branch];
+  if (!getter) throw new Error(`Unknown branch "${branch}". Known branches: ${branchNames().join(', ')}`);
+  const id = getter();
+  if (!id) throw new Error(`Branch "${branch}" has no Sheet ID configured (set SHEET_ID_${branch.toUpperCase()} in your environment variables)`);
+  return id;
+}
 
 // ── Tab definitions (mirrors Code.gs TABS) ───────────────────────────
 const TABS = {
@@ -54,7 +87,7 @@ const TABS = {
   Sales:     ['Sale ID','Date','Item/Customer Name','Type (Product/Repair)','Revenue','Cost','Profit','Payment Mode','Cash Amount','UPI Amount'],
   Repairs:   ['Repair ID','Date','Customer Name','Phone','Brand','Model','Issue','Part Used (Product ID)','Repair Charge','Technician Cost','Status'],
   Expenses:  ['Expense ID','Date','Category','Amount','Notes'],
-  Users:     ['Username','Password Hash','Role','Display Name'],
+  Users:     ['Username','Password Hash','Role','Display Name','Branch'],
 };
 
 // Category → allowed subcategories (frontend also has this list; kept here
@@ -69,19 +102,19 @@ const CATEGORIES = {
 };
 
 // ── Ensure tab exists with correct header ────────────────────────────
-async function ensureTab(sheets, tabName) {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID() });
+async function ensureTab(sheets, tabName, spreadsheetId) {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const existing = meta.data.sheets.map(s => s.properties.title);
 
   if (!existing.includes(tabName)) {
     // Create the sheet tab
     await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SHEET_ID(),
+      spreadsheetId,
       requestBody: { requests: [{ addSheet: { properties: { title: tabName } } }] },
     });
     // Write header row
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID(),
+      spreadsheetId,
       range: `${tabName}!A1`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [TABS[tabName]] },
@@ -89,13 +122,13 @@ async function ensureTab(sheets, tabName) {
   } else {
     // Make sure header row exists, and matches the current expected TABS shape.
     const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID(),
+      spreadsheetId,
       range: `${tabName}!A1:1`,
     });
     const existingHeader = (res.data.values || [])[0] || [];
     if (existingHeader.length === 0) {
       await sheets.spreadsheets.values.update({
-        spreadsheetId: SHEET_ID(),
+        spreadsheetId,
         range: `${tabName}!A1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [TABS[tabName]] },
@@ -108,7 +141,7 @@ async function ensureTab(sheets, tabName) {
       if (missing.length > 0) {
         const newHeader = [...existingHeader, ...missing];
         await sheets.spreadsheets.values.update({
-          spreadsheetId: SHEET_ID(),
+          spreadsheetId,
           range: `${tabName}!A1`,
           valueInputOption: 'USER_ENTERED',
           requestBody: { values: [newHeader] },
@@ -119,12 +152,13 @@ async function ensureTab(sheets, tabName) {
 }
 
 // ── Read all rows from a tab as an array of objects ──────────────────
-async function sheetToObjects(tabName) {
+async function sheetToObjects(tabName, spreadsheetId) {
+  if (!spreadsheetId) throw new Error(`sheetToObjects("${tabName}") called without a spreadsheetId`);
   const sheets = getSheetsClient();
-  await ensureTab(sheets, tabName);
+  await ensureTab(sheets, tabName, spreadsheetId);
 
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID(),
+    spreadsheetId,
     range: `${tabName}!A:${colLetter(TABS[tabName].length - 1)}`,
   });
 
@@ -142,9 +176,9 @@ async function sheetToObjects(tabName) {
 }
 
 // ── Find the 1-based row number for a given id value in column A ─────
-async function findRowById(sheets, tabName, idValue) {
+async function findRowById(sheets, tabName, idValue, spreadsheetId) {
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID(),
+    spreadsheetId,
     range: `${tabName}!A:A`,
   });
   const col = res.data.values || [];
@@ -155,18 +189,19 @@ async function findRowById(sheets, tabName, idValue) {
 }
 
 // ── Upsert a row (insert or update by column-A id) ───────────────────
-async function upsertRow(tabName, idValue, fieldsObj) {
+async function upsertRow(tabName, idValue, fieldsObj, spreadsheetId) {
+  if (!spreadsheetId) throw new Error(`upsertRow("${tabName}") called without a spreadsheetId`);
   const sheets = getSheetsClient();
-  await ensureTab(sheets, tabName);
+  await ensureTab(sheets, tabName, spreadsheetId);
   const headers = TABS[tabName];
   const lastCol = colLetter(headers.length - 1);
 
   // Fetch existing row if present
-  const rowNum = await findRowById(sheets, tabName, idValue);
+  const rowNum = await findRowById(sheets, tabName, idValue, spreadsheetId);
   let existingRow = [];
   if (rowNum > 0) {
     const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID(),
+      spreadsheetId,
       range: `${tabName}!A${rowNum}:${lastCol}${rowNum}`,
     });
     existingRow = (res.data.values || [[]])[0];
@@ -179,14 +214,14 @@ async function upsertRow(tabName, idValue, fieldsObj) {
 
   if (rowNum > 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID(),
+      spreadsheetId,
       range: `${tabName}!A${rowNum}:${lastCol}${rowNum}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [finalRow] },
     });
   } else {
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID(),
+      spreadsheetId,
       range: `${tabName}!A1`,
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
@@ -198,21 +233,22 @@ async function upsertRow(tabName, idValue, fieldsObj) {
 }
 
 // ── Delete a row by its column-A id value ────────────────────────────
-async function deleteRowById(tabName, idValue) {
+async function deleteRowById(tabName, idValue, spreadsheetId) {
+  if (!spreadsheetId) throw new Error(`deleteRowById("${tabName}") called without a spreadsheetId`);
   const sheets = getSheetsClient();
-  await ensureTab(sheets, tabName);
+  await ensureTab(sheets, tabName, spreadsheetId);
 
-  const rowNum = await findRowById(sheets, tabName, idValue);
+  const rowNum = await findRowById(sheets, tabName, idValue, spreadsheetId);
   if (rowNum < 0) return;
 
   // Get the numeric sheetId for the named tab
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID() });
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const tabMeta = meta.data.sheets.find(s => s.properties.title === tabName);
   if (!tabMeta) return;
   const sheetId = tabMeta.properties.sheetId;
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SHEET_ID(),
+    spreadsheetId,
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -224,11 +260,12 @@ async function deleteRowById(tabName, idValue) {
 }
 
 // ── Get last row count for a tab (used to generate sequential IDs) ───
-async function getLastRow(tabName) {
+async function getLastRow(tabName, spreadsheetId) {
+  if (!spreadsheetId) throw new Error(`getLastRow("${tabName}") called without a spreadsheetId`);
   const sheets = getSheetsClient();
-  await ensureTab(sheets, tabName);
+  await ensureTab(sheets, tabName, spreadsheetId);
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID(),
+    spreadsheetId,
     range: `${tabName}!A:A`,
   });
   return (res.data.values || []).length;
@@ -246,4 +283,7 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-module.exports = { sheetToObjects, upsertRow, deleteRowById, getLastRow, TABS, CATEGORIES, today };
+module.exports = {
+  sheetToObjects, upsertRow, deleteRowById, getLastRow, TABS, CATEGORIES, today,
+  MASTER_SHEET_ID, resolveBranchSheetId, branchNames,
+};
