@@ -76,7 +76,13 @@ function validateConfig() {
   const errors = [];
 
   if (!process.env.SHEET_ID) {
-    errors.push('SHEET_ID is not set in .env');
+    errors.push('SHEET_ID (master sheet, holds the shared Users/login tab) is not set in .env');
+  }
+  if (!process.env.SHEET_ID_SITHALAPAKKAM) {
+    errors.push('SHEET_ID_SITHALAPAKKAM is not set — the Sithalapakkam branch has no sheet configured');
+  }
+  if (!process.env.SHEET_ID_ARASANKAZHANI) {
+    errors.push('SHEET_ID_ARASANKAZHANI is not set — the Arasankazhani branch has no sheet configured');
   }
 
   const hasKeyEnv  = !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
@@ -87,7 +93,7 @@ function validateConfig() {
       `No Google credentials found (checked GOOGLE_SERVICE_ACCOUNT_KEY env var and ${keyPath})\n` +
       '  → Local dev: download a key from Google Cloud Console → IAM → Service Accounts → Keys\n' +
       '  → Vercel: paste the key JSON into the GOOGLE_SERVICE_ACCOUNT_KEY environment variable\n' +
-      '  → Either way, share your Google Sheet with the service account email (Editor access)'
+      '  → Either way, share ALL your Google Sheets (master + every branch) with the service account email (Editor access)'
     );
   }
 
