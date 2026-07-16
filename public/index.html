@@ -118,9 +118,10 @@
                     <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-title">This Month's Sales</div><div class="kpi-value">&#8377;<span id="kpi-glass">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6 admin-only"><div class="kpi-card danger"><div class="kpi-title">Spare Parts Cost</div><div class="kpi-value">&#8377;<span id="kpi-spares">0</span></div></div></div>
                     <div class="col-md-3 col-sm-6"><div class="kpi-card success"><div class="kpi-title">Active Repairs</div><div class="kpi-value"><span id="kpi-activerepairs">0</span></div></div></div>
+                    <div class="col-md-3 col-sm-6"><div class="kpi-card warning" style="cursor:pointer" onclick="app.showView('inventory', document.querySelector('#nav-menu li:nth-child(3) a'))"><div class="kpi-title"><i class="fas fa-triangle-exclamation me-1"></i>Low Stock Items</div><div class="kpi-value"><span id="kpi-lowstock">0</span></div></div></div>
                 </div>
                 <div class="row mt-3">
-                    <div class="col-md-8"><div class="data-card h-100"><h6>Sales Trend</h6><div id="chart_sales" style="width:100%;height:300px"></div></div></div>
+                    <div class="col-md-8"><div class="data-card h-100"><div class="d-flex justify-content-between align-items-center"><h6 class="m-0">Sales Trend</h6><button class="btn btn-sm btn-outline-secondary" onclick="app.exportSalesCSV()"><i class="fas fa-file-csv"></i> Export Sales CSV</button></div><div id="chart_sales" style="width:100%;height:300px"></div></div></div>
                     <div class="col-md-4"><div class="data-card h-100"><h6>Revenue Split</h6><div id="chart_revenue" style="width:100%;height:300px"></div></div></div>
                 </div>
             </div>
@@ -185,6 +186,7 @@
                         <h5 class="m-0">Product Inventory</h5>
                         <div class="d-flex gap-2">
                             <button class="btn btn-success" onclick="app.openModal('uploadInvoiceModal')"><i class="fas fa-robot"></i> AI Ingest</button>
+                            <button class="btn btn-outline-secondary" onclick="app.exportInventoryCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
                             <button class="btn btn-primary" onclick="app.openAddProduct()"><i class="fas fa-plus"></i> Add Product</button>
                         </div>
                     </div>
@@ -252,6 +254,7 @@
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h5 class="m-0">Shop Expenses</h5>
                         <button class="btn btn-primary" onclick="app.openModal('expenseModal')"><i class="fas fa-plus"></i> Add Expense</button>
+                        <button class="btn btn-outline-secondary ms-2" onclick="app.exportExpensesCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle">
@@ -337,6 +340,31 @@
             <div class="mb-3"><label>Description / Requirement</label><textarea id="cust-description-input" class="form-control" rows="2" placeholder="e.g. Looking for a budget 5G phone, follow up next week"></textarea></div>
         </div>
         <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="app.saveCustomer()">Save Customer</button></div>
+    </div></div>
+</div>
+
+<!-- CUSTOMER PURCHASE/REPAIR HISTORY -->
+<div class="modal fade" id="customerHistoryModal" tabindex="-1">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+        <div class="modal-header">
+            <h5 class="modal-title"><i class="fas fa-clock-rotate-left text-primary me-2"></i>History — <span id="ch-cust-name"></span> <small class="text-muted">(<span id="ch-cust-mobile"></span>)</small></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+            <div class="alert alert-light border d-flex justify-content-between align-items-center py-2 mb-3">
+                <span class="text-muted small">Total spent (purchases + repairs)</span>
+                <span class="fw-bold fs-5 text-primary">&#8377;<span id="ch-total-spent">0.00</span></span>
+            </div>
+            <h6>Purchases</h6>
+            <div class="table-responsive mb-4">
+                <table class="table table-sm"><thead class="table-light"><tr><th>Date</th><th>Invoice</th><th>Amount</th><th>Payment</th><th>Status</th><th></th></tr></thead><tbody id="ch-sales-tbody"></tbody></table>
+            </div>
+            <h6>Repairs</h6>
+            <div class="table-responsive">
+                <table class="table table-sm"><thead class="table-light"><tr><th>Date</th><th>Job Card</th><th>Device</th><th>Issue</th><th>Total</th><th>Status</th></tr></thead><tbody id="ch-repairs-tbody"></tbody></table>
+            </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
     </div></div>
 </div>
 
@@ -499,11 +527,12 @@ var db = {
 // API HELPER  — replaces google.script.run
 // ═══════════════════════════════════════════════════════════════════════
 var api = {
-    _call: function(method, path, body) {
+    _call: function(method, path, body, branchOverride) {
         var headers = { 'Content-Type': 'application/json' };
         var token = localStorage.getItem('vm_token');
         if (token) headers['Authorization'] = 'Bearer ' + token;
-        if (app.currentBranch) headers['X-Branch'] = app.currentBranch;
+        var branch = branchOverride || app.currentBranch;
+        if (branch && branch !== 'ALL') headers['X-Branch'] = branch;
         var opts = { method: method, headers: headers };
         if (body) opts.body = JSON.stringify(body);
         return fetch('/api' + path, opts).then(function(r) {
@@ -532,8 +561,8 @@ var api = {
             return res.json.data;
         });
     },
-    get:  function(path)       { return this._call('GET', path, null); },
-    post: function(path, body) { return this._call('POST', path, body); },
+    get:  function(path, branchOverride)       { return this._call('GET', path, null, branchOverride); },
+    post: function(path, body, branchOverride) { return this._call('POST', path, body, branchOverride); },
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -548,65 +577,109 @@ var app = {
     extractedHeader: {},
 
     // ── Load all CRM data from the Node server (called after login) ───
+    // Maps one /crm-data response into the shape our local db.* arrays use.
+    // Shared by the single-branch load and the combined all-branches load.
+    _mapCrmData: function(data, branchTag) {
+        var out = { products: [], customers: [], repairs: [], expenses: [], sales: [] };
+        if (data.Inventory) {
+            out.products = data.Inventory.map(function(item) {
+                return {
+                    id:          item.id   || '',
+                    name:        item.name || '',
+                    category:    item.category || 'Accessories',
+                    subcategory: item.subcategory || '',
+                    brand:       item.brand    || 'Generic',
+                    model:       item.model    || '',
+                    hsn:         item.hsn      || '',
+                    imei:        item.imei     || '',
+                    batch:       item.batch    || '',
+                    supplier:    item.supplier || '',
+                    price:    parseFloat(item.selling || 0),
+                    pprice:   parseFloat(item.cost    || 0),
+                    stock:    parseInt(item.stock     || 0),
+                    branch:   branchTag || null,
+                };
+            });
+        }
+        if (data.Customers) {
+            out.customers = data.Customers.map(function(c) {
+                return { name: c.name || '', mobile: c.mobile || '', total: parseFloat(c.history || 0), pending: parseFloat(c.pending || 0), description: c.description || '', branch: branchTag || null };
+            });
+        }
+        if (data.Repairs) {
+            out.repairs = data.Repairs.map(function(r) {
+                var total   = parseFloat(r.charge        || 0);
+                var service = parseFloat(r.technicianCost || 0);
+                return {
+                    jobCard: r.id || '', date: r.date || '', name: r.customerName || '',
+                    mobile: r.phone || '', brand: r.brand || '', model: r.model || '',
+                    issue: r.issue || '',
+                    device: (r.brand && r.model) ? (r.brand + ' ' + r.model) : '',
+                    status: r.status || 'Received',
+                    spare: total - service, service: service, total: total,
+                    branch: branchTag || null,
+                };
+            });
+        }
+        if (data.Expenses) {
+            out.expenses = data.Expenses.map(function(e) {
+                return { date: e.date || '', cat: e.category || 'Other', desc: e.notes || '', amount: parseFloat(e.amount || 0), addedBy: 'Admin', branch: branchTag || null };
+            });
+        }
+        if (data.Sales) {
+            out.sales = data.Sales.map(function(s) {
+                return {
+                    id:      s.id   || '',
+                    date:    s.date || '',
+                    name:    s.name || '',
+                    mobile:  s.mobile || '',
+                    type:    s.type || 'Product',
+                    revenue: parseFloat(s.revenue || 0),
+                    cost:    parseFloat(s.cost    || 0),
+                    profit:  parseFloat(s.profit  || 0),
+                    invoiceNo: s.invoiceNo || s.id || '',
+                    status:  s.status || 'Completed',
+                    branch:  branchTag || null,
+                };
+            });
+        }
+        return out;
+    },
+
     loadFromServer: function() {
         var self = this;
-        api.get('/crm-data').then(function(data) {
-            if (data.Inventory) {
-                db.products = data.Inventory.map(function(item) {
-                    return {
-                        id:          item.id   || '',
-                        name:        item.name || '',
-                        category:    item.category || 'Accessories',
-                        subcategory: item.subcategory || '',
-                        brand:       item.brand    || 'Generic',
-                        model:       item.model    || '',
-                        hsn:         item.hsn      || '',
-                        imei:        item.imei     || '',
-                        batch:       item.batch    || '',
-                        supplier:    item.supplier || '',
-                        price:    parseFloat(item.selling || 0),
-                        pprice:   parseFloat(item.cost    || 0),
-                        stock:    parseInt(item.stock     || 0),
-                    };
+
+        if (this.currentBranch === 'ALL') {
+            // Admin combined view: fetch every branch's data in parallel and
+            // merge. Editing/POS views are blocked while ALL is selected (see
+            // showView), so this only ever needs to feed the Dashboard.
+            var branches = this.availableBranches || [];
+            return Promise.all(branches.map(function(b) { return api.get('/crm-data', b); }))
+                .then(function(results) {
+                    db.products = []; db.customers = []; db.repairs = []; db.expenses = []; db.sales = [];
+                    results.forEach(function(data, i) {
+                        var mapped = self._mapCrmData(data, branches[i]);
+                        db.products  = db.products.concat(mapped.products);
+                        db.customers = db.customers.concat(mapped.customers);
+                        db.repairs   = db.repairs.concat(mapped.repairs);
+                        db.expenses  = db.expenses.concat(mapped.expenses);
+                        db.sales     = db.sales.concat(mapped.sales);
+                    });
+                    self.loadDashboard();
+                }).catch(function(err) {
+                    console.error('Failed to load combined CRM data:', err);
+                    self.showAlert('Could not reach the server. Is it running? (' + err.message + ')', 'danger');
+                    self.loadDashboard();
                 });
-            }
-            if (data.Customers) {
-                db.customers = data.Customers.map(function(c) {
-                    return { name: c.name || '', mobile: c.mobile || '', total: parseFloat(c.history || 0), pending: parseFloat(c.pending || 0), description: c.description || '' };
-                });
-            }
-            if (data.Repairs) {
-                db.repairs = data.Repairs.map(function(r) {
-                    var total   = parseFloat(r.charge        || 0);
-                    var service = parseFloat(r.technicianCost || 0);
-                    return {
-                        jobCard: r.id || '', date: r.date || '', name: r.customerName || '',
-                        mobile: r.phone || '', brand: r.brand || '', model: r.model || '',
-                        issue: r.issue || '',
-                        device: (r.brand && r.model) ? (r.brand + ' ' + r.model) : '',
-                        status: r.status || 'Received',
-                        spare: total - service, service: service, total: total,
-                    };
-                });
-            }
-            if (data.Expenses) {
-                db.expenses = data.Expenses.map(function(e) {
-                    return { date: e.date || '', cat: e.category || 'Other', desc: e.notes || '', amount: parseFloat(e.amount || 0), addedBy: 'Admin' };
-                });
-            }
-            if (data.Sales) {
-                db.sales = data.Sales.map(function(s) {
-                    return {
-                        id:      s.id   || '',
-                        date:    s.date || '',
-                        name:    s.name || '',
-                        type:    s.type || 'Product',
-                        revenue: parseFloat(s.revenue || 0),
-                        cost:    parseFloat(s.cost    || 0),
-                        profit:  parseFloat(s.profit  || 0),
-                    };
-                });
-            }
+        }
+
+        return api.get('/crm-data').then(function(data) {
+            var mapped = self._mapCrmData(data);
+            db.products  = mapped.products;
+            db.customers = mapped.customers;
+            db.repairs   = mapped.repairs;
+            db.expenses  = mapped.expenses;
+            db.sales     = mapped.sales;
             self.loadDashboard();
         }).catch(function(err) {
             console.error('Failed to load CRM data:', err);
@@ -711,17 +784,21 @@ var app = {
             return Promise.resolve();
         }
 
-        // Admin: populate the switcher from the server's known branch list.
+        // Admin: populate the switcher from the server's known branch list,
+        // plus a combined "All Branches" option for a bird's-eye dashboard.
         badge.classList.add('hidden');
         switcher.classList.remove('hidden');
         return api.get('/branches').then(function(branches) {
-            switcher.innerHTML = branches.map(function(b) { return '<option value="' + b + '">' + b + '</option>'; }).join('');
+            self.availableBranches = branches;
+            var options = branches.map(function(b) { return '<option value="' + b + '">' + b + '</option>'; }).join('');
+            options += '<option value="ALL">— All Branches (combined) —</option>';
+            switcher.innerHTML = options;
             var saved = localStorage.getItem('vm_branch');
-            var initial = (saved && branches.indexOf(saved) !== -1) ? saved : branches[0];
+            var initial = (saved && (branches.indexOf(saved) !== -1 || saved === 'ALL')) ? saved : branches[0];
             switcher.value = initial;
             self.currentBranch = initial;
             localStorage.setItem('vm_branch', initial);
-            document.getElementById('topbar-branch-name').innerText = initial;
+            document.getElementById('topbar-branch-name').innerText = initial === 'ALL' ? 'All Branches' : initial;
         }).catch(function(err) {
             self.showAlert('Could not load branch list: ' + err.message, 'danger');
         });
@@ -730,8 +807,8 @@ var app = {
     switchBranch: function(branch) {
         this.currentBranch = branch;
         localStorage.setItem('vm_branch', branch);
-        document.getElementById('topbar-branch-name').innerText = branch;
-        this.showAlert('Switched to ' + branch, 'info');
+        document.getElementById('topbar-branch-name').innerText = branch === 'ALL' ? 'All Branches' : branch;
+        this.showAlert('Switched to ' + (branch === 'ALL' ? 'All Branches (combined)' : branch), 'info');
         this.showView('dashboard', document.querySelector('#nav-menu li a'));
         this.loadFromServer();
     },
@@ -797,6 +874,10 @@ var app = {
     },
 
     showView: function(viewId, linkEl) {
+        if (viewId !== 'dashboard' && viewId !== 'settings' && this.currentBranch === 'ALL') {
+            this.showAlert('Pick a specific branch from the sidebar first — "All Branches" is a combined view for the Dashboard only.', 'warning');
+            return;
+        }
         document.querySelectorAll('.view-section').forEach(function(el) { el.classList.add('hidden'); });
         var target = document.getElementById('view-' + viewId);
         if (target) target.classList.remove('hidden');
@@ -817,7 +898,7 @@ var app = {
 
     // ── Dashboard ─────────────────────────────────────────────────────
     loadDashboard: function() {
-        var salesList   = db.sales   || [];
+        var salesList   = (db.sales || []).filter(function(s){ return s.status !== 'Refunded'; });
         var repairsList = db.repairs || [];
         var todayStr = new Date().toISOString().slice(0, 10);
         var monthPrefix = todayStr.slice(0, 7); // yyyy-MM
@@ -839,6 +920,16 @@ var app = {
         document.getElementById('kpi-glass').innerText = monthRevenue.toFixed(2);
         document.getElementById('kpi-spares').innerText = spCost.toFixed(2);
         document.getElementById('kpi-activerepairs').innerText = repairsList.filter(function(r){ return r.status !== 'Delivered'; }).length;
+
+        var LOW_STOCK_THRESHOLD = 5;
+        var lowStockItems = (db.products || []).filter(function(p) { return p.stock > 0 && p.stock <= LOW_STOCK_THRESHOLD && p.category !== 'Mobiles'; });
+        document.getElementById('kpi-lowstock').innerText = lowStockItems.length;
+        if (lowStockItems.length > 0 && !this._lowStockAlertShown) {
+            this._lowStockAlertShown = true; // only nag once per session, not on every dashboard revisit
+            var names = lowStockItems.slice(0, 3).map(function(p){ return p.name; }).join(', ');
+            var extra = lowStockItems.length > 3 ? ' and ' + (lowStockItems.length - 3) + ' more' : '';
+            this.showAlert('<i class="fas fa-triangle-exclamation me-1"></i>Low stock: ' + names + extra + ' — consider reordering.', 'warning');
+        }
         this.drawCharts();
     },
 
@@ -850,8 +941,9 @@ var app = {
             if (!el1 || el1.offsetWidth === 0) return;
 
             // ── Sales Trend: real revenue-by-date from the Sales sheet ──
+            var chartSales = (db.sales || []).filter(function(s){ return s.status !== 'Refunded'; });
             var byDate = {};
-            (db.sales || []).forEach(function(s) {
+            chartSales.forEach(function(s) {
                 var d = s.date || 'Unknown';
                 byDate[d] = (byDate[d] || 0) + (parseFloat(s.revenue) || 0);
             });
@@ -866,7 +958,7 @@ var app = {
             new google.visualization.LineChart(el1).draw(ds,{curveType:'function',legend:{position:'bottom'},colors:['#3b82f6'],chartArea:{width:'85%',height:'70%'}});
 
             // ── Revenue Split: Product sales vs Repair/Service income ──
-            var productRevenue = (db.sales || []).reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
+            var productRevenue = chartSales.reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
             var serviceRevenue = (db.repairs || []).reduce(function(s,r){ return s + (parseFloat(r.service) || 0); }, 0);
             var dr = google.visualization.arrayToDataTable([
                 ['Cat', 'Rev'],
@@ -1003,7 +1095,7 @@ var app = {
             cashAmount:   cashAmount,
             upiAmount:    upiAmount,
             items:        this.cart.map(function(item){ return { productId: item.id, qty: item.qty, sellingPrice: item.price }; }),
-        }).then(function() {
+        }).then(function(result) {
             // Update local db stock
             self.cart.forEach(function(item) {
                 var p = db.products.find(function(x){ return x.id === item.id; });
@@ -1014,15 +1106,17 @@ var app = {
             if (cx) cx.total += total;
             else db.customers.push({ name: name, mobile: mobile, total: total, pending: 0 });
 
+            var displayInvoiceNo = (result && result.invoiceNo) ? result.invoiceNo : invNo;
+
             self.cart = []; self.renderCart(); self.renderPOSProducts();
             document.getElementById('cart-customer-mobile').value = '';
             document.getElementById('cart-customer-name').value   = '';
             document.getElementById('pos-split-cash').value = 0;
             document.getElementById('pos-split-upi').value  = 0;
-            self.showAlert('Sale complete! Invoice: ' + invNo + ' | Total: ₹' + total.toFixed(2), 'success');
+            self.showAlert('Sale complete! Invoice: ' + displayInvoiceNo + ' | Total: ₹' + total.toFixed(2), 'success');
 
             self.generateInvoicePDF({
-                invoiceNo: invNo,
+                invoiceNo: displayInvoiceNo,
                 date: new Date().toLocaleDateString('en-GB'),
                 customerName: name,
                 mobile: mobile,
@@ -1375,7 +1469,7 @@ var app = {
         tbody.innerHTML = '';
         db.repairs.forEach(function(r) {
             var badge = (r.status==='Ready'||r.status==='Delivered') ? 'bg-success' : 'bg-warning text-dark';
-            tbody.innerHTML += '<tr><td><strong>'+r.jobCard+'</strong></td><td>'+r.date+'</td><td>'+r.name+'</td><td>'+r.device+'</td><td><span class="badge '+badge+'">'+r.status+'</span></td><td>&#8377;'+r.total+'</td><td><button class="btn btn-sm btn-outline-primary me-1" onclick="app.editRepair(\''+r.jobCard+'\')"><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-outline-success" onclick="app.waRepair(\''+r.jobCard+'\')"><i class="fab fa-whatsapp"></i></button></td></tr>';
+            tbody.innerHTML += '<tr><td><strong>'+r.jobCard+'</strong></td><td>'+r.date+'</td><td>'+r.name+'</td><td>'+r.device+'</td><td><span class="badge '+badge+'">'+r.status+'</span></td><td>&#8377;'+r.total+'</td><td><button class="btn btn-sm btn-outline-primary me-1" onclick="app.editRepair(\''+r.jobCard+'\')" title="Edit"><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-outline-secondary me-1" onclick="app.downloadRepairReceipt(\''+r.jobCard+'\')" title="Download Receipt"><i class="fas fa-file-invoice"></i></button><button class="btn btn-sm btn-outline-success" onclick="app.waRepair(\''+r.jobCard+'\')" title="WhatsApp"><i class="fab fa-whatsapp"></i></button></td></tr>';
         });
     },
 
@@ -1440,13 +1534,140 @@ var app = {
         window.open('https://wa.me/' + m + '?text=' + encodeURIComponent('Hello ' + r.name + ',\nJob Card: ' + jc + '\nStatus: ' + r.status + '\nDevice: ' + r.device + '\nTotal: ₹' + r.total + '\n- Vimal Mobiles'), '_blank');
     },
 
+    // ── Repair receipt PDF (reuses the same jsPDF loader/shop info as sales invoices) ──
+    downloadRepairReceipt: function(jc) {
+        var self = this;
+        var r = db.repairs.find(function(x){ return x.jobCard === jc; });
+        if (!r) return;
+        this._loadJsPDF(function(err) {
+            if (err) { self.showAlert('Could not generate PDF: ' + err.message, 'danger'); return; }
+            try {
+                var jsPDF = window.jspdf.jsPDF;
+                var doc = new jsPDF({ unit: 'pt', format: 'a4' });
+                var pageW = doc.internal.pageSize.getWidth();
+                var marginX = 40, y = 50;
+                var shop = self.SHOP_INFO;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+                doc.text(shop.name, marginX, y);
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                y += 16; doc.text(shop.gstin, marginX, y);
+                y += 13; doc.text(shop.mobile, marginX, y);
+                y += 13; doc.text(shop.email, marginX, y);
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+                doc.text('REPAIR RECEIPT', pageW - marginX, 50, { align: 'right' });
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                doc.text('Job Card #: ' + r.jobCard, pageW - marginX, 66, { align: 'right' });
+                doc.text('Date: ' + (r.date || ''), pageW - marginX, 80, { align: 'right' });
+
+                y = Math.max(y, 80) + 20;
+                doc.setDrawColor(200); doc.line(marginX, y, pageW - marginX, y);
+                y += 25;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+                doc.text('Customer:', marginX, y);
+                doc.setFont('helvetica', 'normal');
+                y += 14; doc.text(r.name || '', marginX, y);
+                y += 14; doc.text('Ph: ' + (r.mobile || ''), marginX, y);
+
+                y += 25;
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+                doc.text('Device:', marginX, y);
+                doc.setFont('helvetica', 'normal');
+                y += 14; doc.text((r.device || '') , marginX, y);
+                y += 20;
+                doc.setFont('helvetica', 'bold'); doc.text('Reported Issue:', marginX, y); doc.setFont('helvetica', 'normal');
+                y += 14;
+                var issueLines = doc.splitTextToSize(r.issue || '-', pageW - marginX * 2);
+                doc.text(issueLines, marginX, y);
+                y += issueLines.length * 12 + 10;
+
+                doc.setFont('helvetica', 'bold'); doc.text('Status:', marginX, y);
+                doc.setFont('helvetica', 'normal'); doc.text(r.status || '', marginX + 60, y);
+                y += 25;
+
+                doc.line(marginX, y, pageW - marginX, y); y += 20;
+                function chargeRow(label, value, bold) {
+                    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+                    doc.setFontSize(bold ? 11 : 9);
+                    doc.text(label, 380, y);
+                    doc.text(value, pageW - marginX, y, { align: 'right' });
+                    y += bold ? 16 : 13;
+                }
+                chargeRow('Spare/Parts Cost:', '\u20B9' + (parseFloat(r.spare) || 0).toFixed(2));
+                chargeRow('Service Charge:', '\u20B9' + (parseFloat(r.service) || 0).toFixed(2));
+                chargeRow('Total:', '\u20B9' + (parseFloat(r.total) || 0).toFixed(2), true);
+
+                y += 30;
+                doc.setFont('helvetica', 'italic'); doc.setFontSize(9);
+                doc.text('Thank you for choosing ' + shop.name + '.', marginX, y);
+                y += 18;
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+                var termLines = doc.splitTextToSize(shop.terms, pageW - marginX * 2);
+                doc.text(termLines, marginX, y);
+
+                doc.save('Repair-Receipt-' + r.jobCard + '.pdf');
+            } catch (e) {
+                self.showAlert('PDF generation failed: ' + e.message, 'danger');
+            }
+        });
+    },
+
     // ── Customers ─────────────────────────────────────────────────────
     renderCustomers: function() {
         var tbody = document.getElementById('customers-tbody');
         tbody.innerHTML = '';
         db.customers.forEach(function(c) {
             var m = String(c.mobile || '').replace(/\D/g, ''); if (m.length === 10) m = '91' + m;
-            tbody.innerHTML += '<tr><td><strong>'+c.name+'</strong></td><td>'+c.mobile+'</td><td class="fw-bold">&#8377;'+parseFloat(c.total).toFixed(2)+'</td><td class="'+(c.pending>0?'text-danger fw-bold':'text-success')+'">&#8377;'+c.pending+'</td><td class="small text-muted">'+(c.description||'&mdash;')+'</td><td><button class="btn btn-sm btn-outline-success" onclick="window.open(\'https://wa.me/'+m+'\',\'_blank\')"><i class="fab fa-whatsapp"></i></button></td></tr>';
+            tbody.innerHTML += '<tr><td><strong>'+c.name+'</strong></td><td>'+c.mobile+'</td><td class="fw-bold">&#8377;'+parseFloat(c.total).toFixed(2)+'</td><td class="'+(c.pending>0?'text-danger fw-bold':'text-success')+'">&#8377;'+c.pending+'</td><td class="small text-muted">'+(c.description||'&mdash;')+'</td><td><button class="btn btn-sm btn-outline-secondary me-1" onclick="app.showCustomerHistory(\''+c.mobile+'\')" title="Purchase &amp; Repair History"><i class="fas fa-clock-rotate-left"></i></button><button class="btn btn-sm btn-outline-success" onclick="window.open(\'https://wa.me/'+m+'\',\'_blank\')" title="WhatsApp"><i class="fab fa-whatsapp"></i></button></td></tr>';
+        });
+    },
+
+    // ── Customer purchase/repair history ────────────────────────────────
+    showCustomerHistory: function(mobile) {
+        var c = db.customers.find(function(x){ return x.mobile === mobile; });
+        if (!c) return;
+        document.getElementById('ch-cust-name').innerText = c.name;
+        document.getElementById('ch-cust-mobile').innerText = c.mobile;
+
+        // Sales: matched reliably by mobile (stored on every sale since this update).
+        // Older sales recorded before this field existed won't have a mobile on
+        // file and so won't appear here — that's a data gap, not a bug.
+        var sales = (db.sales || []).filter(function(s){ return s.mobile === mobile; }).sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+        var salesBody = document.getElementById('ch-sales-tbody');
+        var isAdmin = this.user.role === 'admin';
+        salesBody.innerHTML = sales.length ? sales.map(function(s) {
+            var refundBtn = (isAdmin && s.status !== 'Refunded')
+                ? '<button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="app.refundSale(\''+s.id+'\',\''+mobile+'\')" title="Refund this sale"><i class="fas fa-rotate-left"></i></button>'
+                : '';
+            return '<tr><td>'+(s.date||'')+'</td><td>'+(s.invoiceNo||s.id)+'</td><td>&#8377;'+s.revenue.toFixed(2)+'</td><td>'+(s.paymentMode||'')+'</td><td><span class="badge '+(s.status==='Refunded'?'bg-danger':'bg-success')+'">'+(s.status||'Completed')+'</span></td><td>'+refundBtn+'</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="text-center text-muted py-3">No purchases on file for this number</td></tr>';
+
+        var repairs = (db.repairs || []).filter(function(r){ return r.mobile === mobile; }).sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+        var repairsBody = document.getElementById('ch-repairs-tbody');
+        repairsBody.innerHTML = repairs.length ? repairs.map(function(r) {
+            return '<tr><td>'+(r.date||'')+'</td><td>'+r.jobCard+'</td><td>'+(r.device||'')+'</td><td>'+(r.issue||'')+'</td><td>&#8377;'+(parseFloat(r.total)||0).toFixed(2)+'</td><td><span class="badge '+((r.status==='Delivered')?'bg-success':'bg-warning text-dark')+'">'+r.status+'</span></td></tr>';
+        }).join('') : '<tr><td colspan="6" class="text-center text-muted py-3">No repair jobs on file for this number</td></tr>';
+
+        var totalSpent = sales.filter(function(s){ return s.status !== 'Refunded'; }).reduce(function(sum,s){ return sum + s.revenue; }, 0)
+                        + repairs.reduce(function(sum,r){ return sum + (parseFloat(r.total)||0); }, 0);
+        document.getElementById('ch-total-spent').innerText = totalSpent.toFixed(2);
+
+        this.openModal('customerHistoryModal');
+    },
+
+    refundSale: function(saleId, mobile) {
+        var self = this;
+        this.showConfirm('Refund this sale? This restocks the items and adjusts the customer\'s total. This cannot be undone.', function() {
+            api.post('/sales/refund', { saleId: saleId }).then(function(result) {
+                self.showAlert('Refund processed — ' + result.restockedItems + ' item(s) restocked.', 'success');
+                return self.loadFromServer(); // pull fresh stock/sales/customer state from the sheet
+            }).then(function() {
+                self.showCustomerHistory(mobile); // keep the modal open, now showing refreshed data
+            }).catch(function(err) {
+                self.showAlert('Refund failed: ' + err.message, 'danger');
+            });
         });
     },
 
@@ -1812,6 +2033,52 @@ var app = {
         }).catch(function(err) {
             self.showAlert('Some items failed to save: ' + err.message, 'danger');
         });
+    },
+
+    // ── CSV export (client-side, no backend needed — data's already loaded) ──
+    exportCSV: function(filename, rows, columns) {
+        if (!rows || !rows.length) { this.showAlert('Nothing to export yet', 'warning'); return; }
+        function esc(v) {
+            v = (v === null || v === undefined) ? '' : String(v);
+            if (/[",\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+            return v;
+        }
+        var header = columns.map(function(c){ return esc(c.label); }).join(',');
+        var lines = rows.map(function(row) {
+            return columns.map(function(c){ return esc(typeof c.value === 'function' ? c.value(row) : row[c.value]); }).join(',');
+        });
+        var csv = header + '\n' + lines.join('\n');
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    },
+
+    exportInventoryCSV: function() {
+        this.exportCSV('inventory-' + (this.currentBranch||'export') + '.csv', db.products, [
+            { label: 'Product ID', value: 'id' }, { label: 'Name', value: 'name' }, { label: 'Category', value: 'category' },
+            { label: 'Subcategory', value: 'subcategory' }, { label: 'Brand', value: 'brand' }, { label: 'Model', value: 'model' },
+            { label: 'IMEI', value: 'imei' }, { label: 'HSN', value: 'hsn' }, { label: 'Supplier', value: 'supplier' },
+            { label: 'Cost Price', value: 'pprice' }, { label: 'Selling Price', value: 'price' }, { label: 'Stock', value: 'stock' },
+        ]);
+    },
+
+    exportExpensesCSV: function() {
+        this.exportCSV('expenses-' + (this.currentBranch||'export') + '.csv', db.expenses, [
+            { label: 'Date', value: 'date' }, { label: 'Category', value: 'cat' }, { label: 'Description', value: 'desc' },
+            { label: 'Amount', value: 'amount' }, { label: 'Added By', value: 'addedBy' },
+        ]);
+    },
+
+    exportSalesCSV: function() {
+        this.exportCSV('sales-' + (this.currentBranch||'export') + '.csv', db.sales, [
+            { label: 'Date', value: 'date' }, { label: 'Invoice No', value: 'invoiceNo' }, { label: 'Customer', value: 'name' },
+            { label: 'Mobile', value: 'mobile' }, { label: 'Revenue', value: 'revenue' }, { label: 'Cost', value: 'cost' },
+            { label: 'Profit', value: 'profit' }, { label: 'Payment Mode', value: 'paymentMode' }, { label: 'Status', value: 'status' },
+            { label: 'Branch', value: function(r){ return r.branch || app.currentBranch; } },
+        ]);
     },
 
     openModal: function(id) {
