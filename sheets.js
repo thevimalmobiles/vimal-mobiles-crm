@@ -113,6 +113,8 @@ const TABS = {
   SaleItems: ['Row ID','Sale ID','Product ID','Product Name','Qty','Price','Amount'],
   Repairs:   ['Repair ID','Date','Customer Name','Phone','Brand','Model','Issue','Part Used (Product ID)','Repair Charge','Technician Cost','Status'],
   Expenses:  ['Expense ID','Date','Category','Amount','Notes'],
+  Finance:   ['Loan ID','Date','Invoice No','Customer Name','Customer Mobile','Partner','App ID','Down Payment','Loan Amount','Status'],
+  ActivityLog: ['Log ID','Timestamp','Username','Role','Action','Details'],
   Users:     ['Username','Password Hash','Role','Display Name','Branch'],
 };
 
@@ -309,7 +311,27 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// ── Activity log ──────────────────────────────────────────────────────
+// Best-effort audit trail: who did what, when. Logging failures are
+// swallowed (logged to console, not thrown) so a hiccup writing the log
+// never blocks or breaks the actual operation being logged.
+async function logActivity(spreadsheetId, username, role, action, details) {
+  try {
+    const id = 'L' + Date.now() + Math.floor(Math.random() * 1000);
+    await upsertRow('ActivityLog', id, {
+      'Log ID':     id,
+      'Timestamp':  new Date().toISOString(),
+      'Username':   username || '',
+      'Role':       role || '',
+      'Action':     action || '',
+      'Details':    details || '',
+    }, spreadsheetId);
+  } catch (err) {
+    console.error('logActivity failed (non-fatal):', err.message);
+  }
+}
+
 module.exports = {
   sheetToObjects, upsertRow, deleteRowById, getLastRow, TABS, CATEGORIES, today,
-  MASTER_SHEET_ID, resolveBranchSheetId, branchNames, invoicePrefixFor,
+  MASTER_SHEET_ID, resolveBranchSheetId, branchNames, invoicePrefixFor, logActivity,
 };
