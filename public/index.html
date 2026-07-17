@@ -267,7 +267,7 @@
 
             <!-- SETTINGS (admin only) -->
             <div id="view-settings" class="view-section hidden">
-                <div class="data-card" style="max-width:480px">
+                <div class="data-card mb-4" style="max-width:480px">
                     <h5 class="mb-4">Change a Password</h5>
                     <div class="mb-3">
                         <label>Account</label>
@@ -279,6 +279,20 @@
                     </div>
                     <div id="settings-msg" class="mb-3 hidden"></div>
                     <button class="btn btn-primary" onclick="app.savePassword()"><i class="fas fa-key"></i> Update Password</button>
+                </div>
+
+                <div class="data-card admin-only">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="m-0"><i class="fas fa-list-check text-primary me-2"></i>Activity Log</h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="app.loadActivityLog()"><i class="fas fa-rotate"></i> Refresh</button>
+                    </div>
+                    <p class="text-muted small">Recent staff actions for the currently selected branch (plus account-level actions like password changes). Most recent first.</p>
+                    <div class="table-responsive" style="max-height:400px;overflow-y:auto">
+                        <table class="table table-sm">
+                            <thead class="table-light" style="position:sticky;top:0"><tr><th>Time</th><th>User</th><th>Role</th><th>Action</th><th>Details</th></tr></thead>
+                            <tbody id="activity-log-tbody"><tr><td colspan="5" class="text-center text-muted py-3">Click Refresh to load</td></tr></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div><!-- /p-4 -->
@@ -515,12 +529,7 @@ var db = {
     customers: [],
     expenses:  [],
     sales:     [],
-    // NOTE: Finance/loan tracking has no backend endpoint yet (see README) —
-    // this stays as placeholder/demo data until that feature is wired up.
-    finance: [
-        {date:'2026-06-10',invoiceNo:'VM55432',customer:'Sunil Kumar',partner:'DMI Finance',appNo:'DMI9081273',downpayment:5000,loanAmount:12500,status:'Pending'},
-        {date:'2026-06-11',invoiceNo:'VM55435',customer:'Deepak',partner:'Samsung Finance+',appNo:'SF99238',downpayment:3000,loanAmount:14999,status:'Disbursed'}
-    ]
+    finance:   [],
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -580,7 +589,7 @@ var app = {
     // Maps one /crm-data response into the shape our local db.* arrays use.
     // Shared by the single-branch load and the combined all-branches load.
     _mapCrmData: function(data, branchTag) {
-        var out = { products: [], customers: [], repairs: [], expenses: [], sales: [] };
+        var out = { products: [], customers: [], repairs: [], expenses: [], sales: [], finance: [] };
         if (data.Inventory) {
             out.products = data.Inventory.map(function(item) {
                 return {
@@ -643,6 +652,16 @@ var app = {
                 };
             });
         }
+        if (data.Finance) {
+            out.finance = data.Finance.map(function(f) {
+                return {
+                    id: f.id || '', date: f.date || '', invoiceNo: f.invoiceNo || '', customer: f.customer || '',
+                    mobile: f.mobile || '', partner: f.partner || '', appNo: f.appNo || '',
+                    downpayment: parseFloat(f.downpayment || 0), loanAmount: parseFloat(f.loanAmount || 0),
+                    status: f.status || 'Pending', branch: branchTag || null,
+                };
+            });
+        }
         return out;
     },
 
@@ -656,7 +675,7 @@ var app = {
             var branches = this.availableBranches || [];
             return Promise.all(branches.map(function(b) { return api.get('/crm-data', b); }))
                 .then(function(results) {
-                    db.products = []; db.customers = []; db.repairs = []; db.expenses = []; db.sales = [];
+                    db.products = []; db.customers = []; db.repairs = []; db.expenses = []; db.sales = []; db.finance = [];
                     results.forEach(function(data, i) {
                         var mapped = self._mapCrmData(data, branches[i]);
                         db.products  = db.products.concat(mapped.products);
@@ -664,6 +683,7 @@ var app = {
                         db.repairs   = db.repairs.concat(mapped.repairs);
                         db.expenses  = db.expenses.concat(mapped.expenses);
                         db.sales     = db.sales.concat(mapped.sales);
+                        db.finance   = db.finance.concat(mapped.finance);
                     });
                     self.loadDashboard();
                 }).catch(function(err) {
@@ -680,6 +700,7 @@ var app = {
             db.repairs   = mapped.repairs;
             db.expenses  = mapped.expenses;
             db.sales     = mapped.sales;
+            db.finance   = mapped.finance;
             self.loadDashboard();
         }).catch(function(err) {
             console.error('Failed to load CRM data:', err);
@@ -848,6 +869,23 @@ var app = {
         }).catch(function(err) {
             sel.innerHTML = '<option>Failed to load</option>';
         });
+        this.loadActivityLog();
+    },
+
+    loadActivityLog: function() {
+        if (this.user.role !== 'admin') return;
+        var tbody = document.getElementById('activity-log-tbody');
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm"></span> Loading…</td></tr>';
+        var branchForLog = (this.currentBranch === 'ALL') ? (this.availableBranches && this.availableBranches[0]) : this.currentBranch;
+        api.get('/activity', branchForLog).then(function(rows) {
+            if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No activity recorded yet</td></tr>'; return; }
+            tbody.innerHTML = rows.map(function(r) {
+                var t = r.timestamp ? new Date(r.timestamp).toLocaleString() : '';
+                return '<tr><td class="small text-muted">'+t+'</td><td>'+(r.username||'')+'</td><td><span class="badge bg-secondary">'+(r.role||'')+'</span></td><td>'+(r.action||'')+'</td><td class="small">'+(r.details||'')+'</td></tr>';
+            }).join('');
+        }).catch(function(err) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-3">Failed to load: '+err.message+'</td></tr>';
+        });
     },
 
     savePassword: function() {
@@ -905,19 +943,24 @@ var app = {
 
         var todaysSales   = salesList.filter(function(s){ return s.date === todayStr; });
         var todaysRepairs = repairsList.filter(function(r){ return r.date === todayStr; });
+        var monthRepairs  = repairsList.filter(function(r){ return (r.date||'').slice(0,7) === monthPrefix; });
 
-        var salesRevenue = todaysSales.reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
-        var salesProfit   = todaysSales.reduce(function(s,x){ return s + (parseFloat(x.profit)  || 0); }, 0);
+        var productRevenueToday = todaysSales.reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
+        var repairRevenueToday  = todaysRepairs.reduce(function(s,r){ return s + (parseFloat(r.total) || 0); }, 0);
+        var salesProfit  = todaysSales.reduce(function(s,x){ return s + (parseFloat(x.profit)  || 0); }, 0);
         var sIncome = todaysRepairs.reduce(function(s,r){ return s + (parseFloat(r.service) || 0); }, 0);
         var spCost  = todaysRepairs.reduce(function(s,r){ return s + (parseFloat(r.spare)   || 0); }, 0);
-        var monthRevenue = salesList.filter(function(s){ return (s.date||'').slice(0,7) === monthPrefix; })
-                                     .reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
 
-        // All these default to 0 until there's real data for today in the sheet.
-        document.getElementById('kpi-sales').innerText = salesRevenue.toFixed(2);
+        var productRevenueMonth = salesList.filter(function(s){ return (s.date||'').slice(0,7) === monthPrefix; })
+                                     .reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
+        var repairRevenueMonth  = monthRepairs.reduce(function(s,r){ return s + (parseFloat(r.total) || 0); }, 0);
+
+        // Today's Sales / This Month's Sales = product sales + repair job revenue combined,
+        // so a repair job counts as a sale, not just a separate "Service Income" line.
+        document.getElementById('kpi-sales').innerText = (productRevenueToday + repairRevenueToday).toFixed(2);
         document.getElementById('kpi-profit').innerText = (salesProfit + sIncome).toFixed(2);
         document.getElementById('kpi-service').innerText = sIncome.toFixed(2);
-        document.getElementById('kpi-glass').innerText = monthRevenue.toFixed(2);
+        document.getElementById('kpi-glass').innerText = (productRevenueMonth + repairRevenueMonth).toFixed(2);
         document.getElementById('kpi-spares').innerText = spCost.toFixed(2);
         document.getElementById('kpi-activerepairs').innerText = repairsList.filter(function(r){ return r.status !== 'Delivered'; }).length;
 
@@ -940,12 +983,16 @@ var app = {
             var el2 = document.getElementById('chart_revenue');
             if (!el1 || el1.offsetWidth === 0) return;
 
-            // ── Sales Trend: real revenue-by-date from the Sales sheet ──
+            // ── Sales Trend: product sales + repair revenue, by date ──
             var chartSales = (db.sales || []).filter(function(s){ return s.status !== 'Refunded'; });
             var byDate = {};
             chartSales.forEach(function(s) {
                 var d = s.date || 'Unknown';
                 byDate[d] = (byDate[d] || 0) + (parseFloat(s.revenue) || 0);
+            });
+            (db.repairs || []).forEach(function(r) {
+                var d = r.date || 'Unknown';
+                byDate[d] = (byDate[d] || 0) + (parseFloat(r.total) || 0);
             });
             var dates = Object.keys(byDate).sort();
             var salesRows = [['Date', 'Sales']];
@@ -957,13 +1004,13 @@ var app = {
             var ds = google.visualization.arrayToDataTable(salesRows);
             new google.visualization.LineChart(el1).draw(ds,{curveType:'function',legend:{position:'bottom'},colors:['#3b82f6'],chartArea:{width:'85%',height:'70%'}});
 
-            // ── Revenue Split: Product sales vs Repair/Service income ──
+            // ── Revenue Split: Product sales vs full Repair revenue (parts + labor) ──
             var productRevenue = chartSales.reduce(function(s,x){ return s + (parseFloat(x.revenue) || 0); }, 0);
-            var serviceRevenue = (db.repairs || []).reduce(function(s,r){ return s + (parseFloat(r.service) || 0); }, 0);
+            var serviceRevenue = (db.repairs || []).reduce(function(s,r){ return s + (parseFloat(r.total) || 0); }, 0);
             var dr = google.visualization.arrayToDataTable([
                 ['Cat', 'Rev'],
                 ['Product Sales', productRevenue],
-                ['Service', serviceRevenue],
+                ['Repairs', serviceRevenue],
             ]);
             new google.visualization.PieChart(el2).draw(dr,{pieHole:.4,colors:['#1e293b','#3b82f6'],legend:{position:'right'},chartArea:{width:'90%',height:'90%'}});
         } catch(e) { console.warn('Chart render deferred:', e); }
@@ -1069,6 +1116,15 @@ var app = {
             }
         }
 
+        var financePartner = '', financeAppId = '', downPayment = 0;
+        if (paymentMode === 'Finance') {
+            financePartner = document.getElementById('pos-fin-partner').value;
+            financeAppId   = document.getElementById('pos-fin-app-id').value.trim();
+            downPayment    = parseFloat(document.getElementById('pos-fin-downpayment').value) || 0;
+            if (!financeAppId) { this.showAlert('Enter the Loan / App ID for this Finance sale', 'warning'); return; }
+            if (downPayment > total) { this.showAlert('Down payment cannot exceed the Grand Total', 'warning'); return; }
+        }
+
         // Snapshot HSN/IMEI per line item now, before stock/cart get mutated below
         var invoiceItems = this.cart.map(function(item) {
             var p = db.products.find(function(x){ return x.id === item.id; });
@@ -1094,6 +1150,9 @@ var app = {
             paymentMode:  paymentMode,
             cashAmount:   cashAmount,
             upiAmount:    upiAmount,
+            financePartner: financePartner,
+            financeAppId:   financeAppId,
+            downPayment:    downPayment,
             items:        this.cart.map(function(item){ return { productId: item.id, qty: item.qty, sellingPrice: item.price }; }),
         }).then(function(result) {
             // Update local db stock
@@ -1113,6 +1172,9 @@ var app = {
             document.getElementById('cart-customer-name').value   = '';
             document.getElementById('pos-split-cash').value = 0;
             document.getElementById('pos-split-upi').value  = 0;
+            document.getElementById('pos-fin-app-id').value = '';
+            document.getElementById('pos-fin-downpayment').value = 0;
+            if (paymentMode === 'Finance') self.loadFromServer(); // refresh so the new loan shows up in Finance Tracker
             self.showAlert('Sale complete! Invoice: ' + displayInvoiceNo + ' | Total: ₹' + total.toFixed(2), 'success');
 
             self.generateInvoicePDF({
@@ -1451,17 +1513,26 @@ var app = {
         var tbody = document.getElementById('finance-tbody');
         tbody.innerHTML = '';
         var unsettled = 0, count = 0;
-        db.finance.forEach(function(f, i) {
+        db.finance.forEach(function(f) {
             if (f.status === 'Pending') { unsettled += f.loanAmount; count++; }
             var badge = f.status === 'Disbursed' ? 'bg-success' : 'bg-warning text-dark';
-            var btn   = f.status === 'Disbursed' ? '<button class="btn btn-sm btn-secondary" disabled>Done</button>' : '<button class="btn btn-sm btn-success" onclick="app.settleLoan('+i+')">Mark Disbursed</button>';
+            var btn   = f.status === 'Disbursed' ? '<button class="btn btn-sm btn-secondary" disabled>Done</button>' : '<button class="btn btn-sm btn-success" onclick="app.settleLoan(\''+f.id+'\')">Mark Disbursed</button>';
             tbody.innerHTML += '<tr><td>'+f.date+'</td><td>'+f.invoiceNo+'</td><td>'+f.customer+'</td><td><span class="badge bg-secondary">'+f.partner+'</span></td><td><code>'+f.appNo+'</code></td><td>&#8377;'+f.downpayment+'</td><td class="fw-bold text-primary">&#8377;'+f.loanAmount+'</td><td><span class="badge '+badge+'">'+f.status+'</span></td><td>'+btn+'</td></tr>';
         });
+        if (!db.finance.length) tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">No Finance/EMI sales recorded yet for this branch</td></tr>';
         document.getElementById('fin-kpi-unsettled').innerText = unsettled.toFixed(2);
         document.getElementById('fin-kpi-count').innerText     = count;
     },
 
-    settleLoan: function(i) { db.finance[i].status = 'Disbursed'; this.renderFinance(); },
+    settleLoan: function(loanId) {
+        var self = this;
+        api.post('/finance/settle', { loanId: loanId }).then(function() {
+            var f = db.finance.find(function(x){ return x.id === loanId; });
+            if (f) f.status = 'Disbursed';
+            self.renderFinance();
+            self.showAlert('Loan marked as disbursed.', 'success');
+        }).catch(function(err) { self.showAlert('Failed: ' + err.message, 'danger'); });
+    },
 
     // ── Repairs ───────────────────────────────────────────────────────
     renderRepairs: function() {
