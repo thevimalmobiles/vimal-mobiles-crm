@@ -24,7 +24,7 @@
 
 const express = require('express');
 const router  = express.Router();
-const { sheetToObjects, upsertRow, deleteRowById, getLastRow, CATEGORIES, today, branchNames, invoicePrefixFor } = require('../sheets');
+const { sheetToObjects, upsertRow, deleteRowById, getLastRow, CATEGORIES, today, branchNames, invoicePrefixFor, logActivity } = require('../sheets');
 const { login, changePassword, requireAuth, requireAdmin, requireBranch } = require('../auth');
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -84,6 +84,8 @@ router.post('/auth/change-password', requireAdmin, (req, res) => {
     if (!username || !newPassword) throw new Error('Username and newPassword are required');
     if (newPassword.length < 4) throw new Error('Password must be at least 4 characters');
     await changePassword(username, newPassword);
+    const { MASTER_SHEET_ID } = require('../sheets');
+    await logActivity(MASTER_SHEET_ID(), req.user.username, req.user.role, 'Password Changed', 'for user: ' + username);
     return { updated: username };
   });
 });
@@ -115,12 +117,13 @@ router.get('/crm-data', (req, res) => {
     const { resolveBranchSheetId } = require('../sheets');
     const spreadsheetId = resolveBranchSheetId(req.branch);
 
-    const [invRows, custRows, repairRows, expRows, salesRows] = await Promise.all([
+    const [invRows, custRows, repairRows, expRows, salesRows, financeRows] = await Promise.all([
       sheetToObjects('Inventory', spreadsheetId),
       sheetToObjects('Customers', spreadsheetId),
       sheetToObjects('Repairs', spreadsheetId),
       sheetToObjects('Expenses', spreadsheetId),
       sheetToObjects('Sales', spreadsheetId),
+      sheetToObjects('Finance', spreadsheetId),
     ]);
 
     const Inventory = invRows.map(r => ({
@@ -189,8 +192,72 @@ router.get('/crm-data', (req, res) => {
       status:      r['Status'] || 'Completed',
     }));
 
+    const Finance = financeRows.map(r => ({
+      id:          str(r['Loan ID']),
+      date:        fmtDate(r['Date']),
+      invoiceNo:   str(r['Invoice No']),
+      customer:    r['Customer Name'],
+      mobile:      str(r['Customer Mobile'] || ''),
+      partner:     r['Partner'],
+      appNo:       str(r['App ID']),
+      downpayment: parseFloat(r['Down Payment']) || 0,
+      loanAmount:  parseFloat(r['Loan Amount']) || 0,
+      status:      r['Status'] || 'Pending',
+    }));
+
     // Staff accounts don't see expense data, even via the API directly
-    return { branch: req.branch, Inventory, Customers, Repairs, Sales, Expenses: req.user.role === 'admin' ? Expenses : [] };
+    return { branch: req.branch, Inventory, Customers, Repairs, Sales, Finance, Expenses: req.user.role === 'admin' ? Expenses : [] };
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// POST /api/finance/settle  →  mark a loan as Disbursed
+// ══════════════════════════════════════════════════════════════════════
+router.post('/finance/settle', (req, res) => {
+  wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
+    const { loanId } = req.body;
+    if (!loanId) throw new Error('loanId is required');
+
+    const rows = await sheetToObjects('Finance', spreadsheetId);
+    const loan = rows.find(r => str(r['Loan ID']) === str(loanId));
+    if (!loan) throw new Error('Loan not found: ' + loanId);
+
+    await upsertRow('Finance', loanId, {
+      'Loan ID':        loan['Loan ID'],
+      'Date':           loan['Date'],
+      'Invoice No':     loan['Invoice No'],
+      'Customer Name':  loan['Customer Name'],
+      'Customer Mobile':loan['Customer Mobile'],
+      'Partner':        loan['Partner'],
+      'App ID':         loan['App ID'],
+      'Down Payment':   loan['Down Payment'],
+      'Loan Amount':    loan['Loan Amount'],
+      'Status':         'Disbursed',
+    }, spreadsheetId);
+
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Loan Settled', loanId);
+    return { success: true };
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// GET /api/activity  →  recent activity log entries (admin only)
+// ══════════════════════════════════════════════════════════════════════
+router.get('/activity', requireAdmin, (req, res) => {
+  wrap(res, async () => {
+    const { resolveBranchSheetId, MASTER_SHEET_ID } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
+    const masterId = MASTER_SHEET_ID();
+    const [branchRows, masterRows] = await Promise.all([
+      sheetToObjects('ActivityLog', spreadsheetId),
+      spreadsheetId !== masterId ? sheetToObjects('ActivityLog', masterId) : Promise.resolve([]),
+    ]);
+    const mapRow = r => ({ id: str(r['Log ID']), timestamp: r['Timestamp'], username: r['Username'], role: r['Role'], action: r['Action'], details: r['Details'] });
+    return branchRows.map(mapRow).concat(masterRows.map(mapRow))
+      .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+      .slice(0, 200); // most recent 200 — plenty for a quick review, keeps the response light
   });
 });
 
@@ -235,6 +302,7 @@ router.post('/inventory/save', (req, res) => {
       'Invoice No':    p.invoiceNo || '',
       'Invoice Date':  p.invoiceDate || '',
     }, spreadsheetId);
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Inventory Saved', id + ' — ' + p.name);
     return { id };
   });
 });
@@ -248,6 +316,7 @@ router.post('/inventory/delete', (req, res) => {
     const spreadsheetId = resolveBranchSheetId(req.branch);
     const { id } = req.body;
     await deleteRowById('Inventory', id, spreadsheetId);
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Inventory Deleted', id);
     return { deleted: id };
   });
 });
@@ -277,6 +346,7 @@ router.post('/customers/save', (req, res) => {
     fields['Pending Amount']   = c.pending !== undefined ? c.pending : (existing ? (existing['Pending Amount'] || 0) : 0);
 
     await upsertRow('Customers', id, fields, spreadsheetId);
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Customer Saved', id + ' — ' + c.name);
     return { id };
   });
 });
@@ -311,6 +381,7 @@ router.post('/repairs/save', (req, res) => {
     }
 
     await upsertRow('Repairs', jobCard, fields, spreadsheetId);
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Repair Saved', jobCard + ' — ' + r.customerName);
     return { id: jobCard };
   });
 });
@@ -331,6 +402,7 @@ router.post('/expenses/add', requireAdmin, (req, res) => {
       'Amount':     e.amount,
       'Notes':      e.notes,
     }, spreadsheetId);
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Expense Added', id + ' — ₹' + e.amount + ' (' + e.category + ')');
     return { id };
   });
 });
@@ -436,6 +508,26 @@ router.post('/sales/record', (req, res) => {
       'Purchase History': prevHistory + revenue,
     }, spreadsheetId);
 
+    // Finance-mode sales also create a Loan Tracker entry
+    if (paymentMode === 'Finance' && payload.financePartner) {
+      const downPayment = parseFloat(payload.downPayment) || 0;
+      const loanId = 'FIN-' + payload.invoiceNo;
+      await upsertRow('Finance', loanId, {
+        'Loan ID':        loanId,
+        'Date':           today(),
+        'Invoice No':     invoiceNo,
+        'Customer Name':  payload.customerName,
+        'Customer Mobile':str(payload.mobile || ''),
+        'Partner':        payload.financePartner,
+        'App ID':         payload.financeAppId || '',
+        'Down Payment':   downPayment,
+        'Loan Amount':    Math.max(0, revenue - downPayment),
+        'Status':         'Pending',
+      }, spreadsheetId);
+    }
+
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Sale Recorded', invoiceNo + ' — ₹' + revenue.toFixed(2) + ' to ' + payload.customerName);
+
     return { success: true, invoiceNo };
   });
 });
@@ -518,6 +610,7 @@ router.post('/sales/refund', requireAdmin, (req, res) => {
       }
     }
 
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Sale Refunded', saleId);
     return { success: true, restockedItems: soldItems.length };
   });
 });
