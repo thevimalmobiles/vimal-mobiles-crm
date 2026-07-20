@@ -188,6 +188,7 @@ async function sheetToObjects(tabName, spreadsheetId) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range: `${tabName}!A:${colLetter(TABS[tabName].length - 1)}`,
+    valueRenderOption: 'UNFORMATTED_VALUE',
   });
 
   const rows = res.data.values || [];
@@ -231,6 +232,7 @@ async function upsertRow(tabName, idValue, fieldsObj, spreadsheetId) {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${tabName}!A${rowNum}:${lastCol}${rowNum}`,
+      valueRenderOption: 'UNFORMATTED_VALUE',
     });
     existingRow = (res.data.values || [[]])[0];
   }
