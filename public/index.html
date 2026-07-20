@@ -187,6 +187,8 @@
                         <div class="d-flex gap-2">
                             <button class="btn btn-success" onclick="app.openModal('uploadInvoiceModal')"><i class="fas fa-robot"></i> AI Ingest</button>
                             <button class="btn btn-outline-secondary" onclick="app.exportInventoryCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+                            <button class="btn btn-outline-secondary" onclick="document.getElementById('inventory-import-input').click()"><i class="fas fa-file-import"></i> Import CSV</button>
+                            <input type="file" id="inventory-import-input" class="hidden" accept=".csv" onchange="app.importInventoryCSV(event)">
                             <button class="btn btn-primary" onclick="app.openAddProduct()"><i class="fas fa-plus"></i> Add Product</button>
                         </div>
                     </div>
@@ -222,6 +224,9 @@
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h5 class="m-0">Repair Job Cards</h5>
                         <button class="btn btn-primary" onclick="app.openAddRepair()"><i class="fas fa-plus"></i> New Job Card</button>
+                        <button class="btn btn-outline-secondary ms-2" onclick="app.exportRepairsCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+                        <button class="btn btn-outline-secondary ms-2" onclick="document.getElementById('repairs-import-input').click()"><i class="fas fa-file-import"></i> Import CSV</button>
+                        <input type="file" id="repairs-import-input" class="hidden" accept=".csv" onchange="app.importRepairsCSV(event)">
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle">
@@ -2107,6 +2112,51 @@ var app = {
     },
 
     // ── CSV export (client-side, no backend needed — data's already loaded) ──
+    // ── CSV import (client-side parse, then one save call per row) ──────
+    // Handles quoted fields with embedded commas/newlines — a hand-rolled
+    // parser rather than pulling in a library, since the format needed here
+    // (simple RFC4180-ish CSV) is small and self-contained.
+    parseCSV: function(text) {
+        var rows = [];
+        var row = [];
+        var field = '';
+        var inQuotes = false;
+        for (var i = 0; i < text.length; i++) {
+            var c = text[i], next = text[i + 1];
+            if (inQuotes) {
+                if (c === '"' && next === '"') { field += '"'; i++; }
+                else if (c === '"') { inQuotes = false; }
+                else { field += c; }
+            } else {
+                if (c === '"') inQuotes = true;
+                else if (c === ',') { row.push(field); field = ''; }
+                else if (c === '\n' || c === '\r') {
+                    if (c === '\r' && next === '\n') i++;
+                    row.push(field); field = '';
+                    if (row.length > 1 || row[0] !== '') rows.push(row);
+                    row = [];
+                } else field += c;
+            }
+        }
+        if (field !== '' || row.length) { row.push(field); rows.push(row); }
+        if (!rows.length) return [];
+        var headers = rows[0].map(function(h){ return h.trim(); });
+        return rows.slice(1).map(function(r) {
+            var obj = {};
+            headers.forEach(function(h, i) { obj[h] = r[i] !== undefined ? r[i].trim() : ''; });
+            return obj;
+        });
+    },
+
+    readFileAsText: function(file) {
+        return new Promise(function(resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function(e) { resolve(e.target.result); };
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
+    },
+
     exportCSV: function(filename, rows, columns) {
         if (!rows || !rows.length) { this.showAlert('Nothing to export yet', 'warning'); return; }
         function esc(v) {
@@ -2150,6 +2200,90 @@ var app = {
             { label: 'Profit', value: 'profit' }, { label: 'Payment Mode', value: 'paymentMode' }, { label: 'Status', value: 'status' },
             { label: 'Branch', value: function(r){ return r.branch || app.currentBranch; } },
         ]);
+    },
+
+    exportRepairsCSV: function() {
+        this.exportCSV('repairs-' + (this.currentBranch||'export') + '.csv', db.repairs, [
+            { label: 'Job Card', value: 'jobCard' }, { label: 'Date', value: 'date' }, { label: 'Customer', value: 'name' },
+            { label: 'Mobile', value: 'mobile' }, { label: 'Brand', value: 'brand' }, { label: 'Model', value: 'model' },
+            { label: 'Issue', value: 'issue' }, { label: 'Status', value: 'status' },
+            { label: 'Spare Cost', value: 'spare' }, { label: 'Service Charge', value: 'service' }, { label: 'Total', value: 'total' },
+        ]);
+    },
+
+    // ── Inventory CSV Import ──────────────────────────────────────────
+    // Expects the same columns exportInventoryCSV produces. Existing
+    // Product IDs get updated in place; blank/new IDs create new products
+    // (mirrors how the AI Invoice Ingestion commit flow works).
+    importInventoryCSV: function(ev) {
+        var self = this;
+        var file = ev.target.files[0]; if (!file) return;
+        this.readFileAsText(file).then(function(text) {
+            var rows = self.parseCSV(text);
+            if (!rows.length) { self.showAlert('CSV appears empty', 'warning'); return; }
+            var promises = rows.map(function(r) {
+                var cat = r['Category'] || 'Accessories';
+                return api.post('/inventory/save', {
+                    id: r['Product ID'] || null,
+                    name: r['Name'] || r['Product Name'] || '',
+                    category: cat,
+                    subcategory: r['Subcategory'] || '',
+                    brand: r['Brand'] || 'Generic',
+                    model: r['Model'] || '',
+                    imei: r['IMEI'] || '',
+                    hsn: r['HSN'] || '',
+                    supplier: r['Supplier'] || '',
+                    cost: parseFloat(r['Cost Price']) || 0,
+                    selling: parseFloat(r['Selling Price']) || 0,
+                    stock: parseInt(r['Stock']) || (cat === 'Mobiles' ? 1 : 0),
+                });
+            });
+            Promise.all(promises).then(function() {
+                self.showAlert(promises.length + ' product(s) imported.', 'success');
+                self.loadFromServer().then(function(){ self.renderInventory(); self.renderPOSProducts(); });
+            }).catch(function(err) {
+                self.showAlert('Some rows failed to import: ' + err.message, 'danger');
+                self.loadFromServer().then(function(){ self.renderInventory(); self.renderPOSProducts(); });
+            });
+        }).catch(function(err) { self.showAlert('Could not read file: ' + err.message, 'danger'); });
+        ev.target.value = ''; // allow re-selecting the same file next time
+    },
+
+    // ── Repairs CSV Import ─────────────────────────────────────────────
+    // Expects the same columns exportRepairsCSV produces. Job Card is
+    // ignored on import (server always assigns a fresh one) since these
+    // are meant for bulk-adding new jobs, not editing existing ones.
+    importRepairsCSV: function(ev) {
+        var self = this;
+        var file = ev.target.files[0]; if (!file) return;
+        this.readFileAsText(file).then(function(text) {
+            var rows = self.parseCSV(text);
+            if (!rows.length) { self.showAlert('CSV appears empty', 'warning'); return; }
+            var promises = rows.map(function(r) {
+                var spare = parseFloat(r['Spare Cost']) || 0;
+                var service = parseFloat(r['Service Charge']) || 0;
+                return api.post('/repairs/save', {
+                    id: null,
+                    customerName: r['Customer'] || '',
+                    phone: r['Mobile'] || '',
+                    brand: r['Brand'] || '',
+                    model: r['Model'] || '',
+                    status: r['Status'] || 'Received',
+                    partId: 'None',
+                    technicianCost: service,
+                    charge: spare + service,
+                    issue: r['Issue'] || '',
+                });
+            });
+            Promise.all(promises).then(function() {
+                self.showAlert(promises.length + ' repair job(s) imported.', 'success');
+                self.loadFromServer().then(function(){ self.renderRepairs(); });
+            }).catch(function(err) {
+                self.showAlert('Some rows failed to import: ' + err.message, 'danger');
+                self.loadFromServer().then(function(){ self.renderRepairs(); });
+            });
+        }).catch(function(err) { self.showAlert('Could not read file: ' + err.message, 'danger'); });
+        ev.target.value = '';
     },
 
     openModal: function(id) {
