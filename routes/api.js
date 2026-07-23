@@ -117,13 +117,14 @@ router.get('/crm-data', (req, res) => {
     const { resolveBranchSheetId } = require('../sheets');
     const spreadsheetId = resolveBranchSheetId(req.branch);
 
-    const [invRows, custRows, repairRows, expRows, salesRows, financeRows] = await Promise.all([
+    const [invRows, custRows, repairRows, expRows, salesRows, financeRows, quoteRows] = await Promise.all([
       sheetToObjects('Inventory', spreadsheetId),
       sheetToObjects('Customers', spreadsheetId),
       sheetToObjects('Repairs', spreadsheetId),
       sheetToObjects('Expenses', spreadsheetId),
       sheetToObjects('Sales', spreadsheetId),
       sheetToObjects('Finance', spreadsheetId),
+      sheetToObjects('Quotations', spreadsheetId),
     ]);
 
     const Inventory = invRows.map(r => ({
@@ -190,6 +191,8 @@ router.get('/crm-data', (req, res) => {
       upiAmount:   parseFloat(r['UPI Amount']) || 0,
       invoiceNo:   r['Invoice No'] || '',
       status:      r['Status'] || 'Completed',
+      taxableValue:parseFloat(r['Taxable Value']) || 0,
+      gstAmount:   parseFloat(r['GST Amount']) || 0,
     }));
 
     const Finance = financeRows.map(r => ({
@@ -205,8 +208,21 @@ router.get('/crm-data', (req, res) => {
       status:      r['Status'] || 'Pending',
     }));
 
+    const Quotations = quoteRows.map(r => ({
+      id:        str(r['Quote ID']),
+      date:      fmtDate(r['Date']),
+      customer:  r['Customer Name'],
+      mobile:    str(r['Customer Mobile'] || ''),
+      itemsJson: r['Items JSON'] || '[]',
+      subtotal:  parseFloat(r['Subtotal']) || 0,
+      discount:  parseFloat(r['Discount']) || 0,
+      gstPct:    parseFloat(r['GST Pct']) || 0,
+      total:     parseFloat(r['Total']) || 0,
+      status:    r['Status'] || 'Open',
+    }));
+
     // Staff accounts don't see expense data, even via the API directly
-    return { branch: req.branch, Inventory, Customers, Repairs, Sales, Finance, Expenses: req.user.role === 'admin' ? Expenses : [] };
+    return { branch: req.branch, Inventory, Customers, Repairs, Sales, Finance, Quotations, Expenses: req.user.role === 'admin' ? Expenses : [] };
   });
 });
 
@@ -258,6 +274,138 @@ router.get('/activity', requireAdmin, (req, res) => {
     return branchRows.map(mapRow).concat(masterRows.map(mapRow))
       .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
       .slice(0, 200); // most recent 200 — plenty for a quick review, keeps the response light
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// POST /api/quotes/save  →  create a quotation (no stock/sales impact)
+// ══════════════════════════════════════════════════════════════════════
+router.post('/quotes/save', (req, res) => {
+  wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
+    const q = req.body;
+    if (!q.customerName) throw new Error('Customer name is required');
+
+    const existingQuotes = await sheetToObjects('Quotations', spreadsheetId);
+    const quoteId = 'QT-' + invoicePrefixFor(req.branch) + '-' + String(existingQuotes.length + 1).padStart(5, '0');
+
+    await upsertRow('Quotations', quoteId, {
+      'Quote ID':        quoteId,
+      'Date':            today(),
+      'Customer Name':   q.customerName,
+      'Customer Mobile': str(q.mobile || ''),
+      'Items JSON':      JSON.stringify(q.items || []),
+      'Subtotal':        q.subtotal || 0,
+      'Discount':        q.discount || 0,
+      'GST Pct':         q.gstPct || 0,
+      'Total':           q.total || 0,
+      'Status':          'Open',
+    }, spreadsheetId);
+
+    await logActivity(spreadsheetId, req.user.username, req.user.role, 'Quotation Created', quoteId + ' — ' + q.customerName);
+    return { id: quoteId };
+  });
+});
+
+// POST /api/quotes/status  →  mark a quotation Converted / Expired
+router.post('/quotes/status', (req, res) => {
+  wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
+    const { quoteId, status } = req.body;
+    if (!quoteId || !status) throw new Error('quoteId and status are required');
+
+    const rows = await sheetToObjects('Quotations', spreadsheetId);
+    const q = rows.find(r => str(r['Quote ID']) === str(quoteId));
+    if (!q) throw new Error('Quotation not found: ' + quoteId);
+
+    await upsertRow('Quotations', quoteId, {
+      'Quote ID': q['Quote ID'], 'Date': q['Date'], 'Customer Name': q['Customer Name'],
+      'Customer Mobile': q['Customer Mobile'], 'Items JSON': q['Items JSON'], 'Subtotal': q['Subtotal'],
+      'Discount': q['Discount'], 'GST Pct': q['GST Pct'], 'Total': q['Total'], 'Status': status,
+    }, spreadsheetId);
+    return { success: true };
+  });
+});
+
+router.post('/quotes/delete', (req, res) => {
+  wrap(res, async () => {
+    const { resolveBranchSheetId } = require('../sheets');
+    const spreadsheetId = resolveBranchSheetId(req.branch);
+    const { quoteId } = req.body;
+    await deleteRowById('Quotations', quoteId, spreadsheetId);
+    return { deleted: quoteId };
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// POST /api/inventory/transfer  →  move stock from this branch to another
+// Admin only, since it touches two branches' sheets in one operation.
+// ══════════════════════════════════════════════════════════════════════
+router.post('/inventory/transfer', requireAdmin, (req, res) => {
+  wrap(res, async () => {
+    if (req.branch === 'ALL') throw new Error('Pick a specific source branch first, not All Branches');
+    const { resolveBranchSheetId, branchNames } = require('../sheets');
+    const { productId, qty, toBranch } = req.body;
+    if (!productId || !toBranch) throw new Error('productId and toBranch are required');
+    if (toBranch === req.branch) throw new Error('Source and destination branch must be different');
+    if (!branchNames().includes(toBranch)) throw new Error('Unknown destination branch: ' + toBranch);
+
+    const fromId = resolveBranchSheetId(req.branch);
+    const toId = resolveBranchSheetId(toBranch);
+
+    const fromInv = await sheetToObjects('Inventory', fromId);
+    const item = fromInv.find(r => str(r['Product ID']) === str(productId));
+    if (!item) throw new Error('Product not found in ' + req.branch + ': ' + productId);
+
+    const isMobile = item['Category'] === 'Mobiles';
+    const transferQty = isMobile ? 1 : (parseInt(qty) || 0);
+    const currentStock = parseFloat(item['Stock']) || 0;
+    if (transferQty <= 0) throw new Error('Transfer quantity must be greater than zero');
+    if (transferQty > currentStock) throw new Error('Cannot transfer more than available stock (' + currentStock + ')');
+
+    if (isMobile) {
+      // One physical phone = one row. Moving it means removing it entirely
+      // from the source branch and recreating the identical row (same IMEI)
+      // at the destination — it can't exist in stock at both branches at once.
+      await deleteRowById('Inventory', productId, fromId);
+      await upsertRow('Inventory', productId, {
+        'Product ID': item['Product ID'], 'Product Name': item['Product Name'], 'Category': item['Category'],
+        'Subcategory': item['Subcategory'], 'Brand': item['Brand'], 'Model': item['Model'], 'HSN Code': item['HSN Code'],
+        'IMEI': item['IMEI'], 'Batch No': item['Batch No'], 'Cost Price': item['Cost Price'], 'Selling Price': item['Selling Price'],
+        'Stock': 1, 'Supplier Name': item['Supplier Name'], 'Invoice No': item['Invoice No'], 'Invoice Date': item['Invoice Date'],
+      }, toId);
+    } else {
+      // Accessories/Spares: decrement source stock, merge into a matching
+      // product at the destination by name (or create a new row there).
+      await upsertRow('Inventory', productId, {
+        'Product ID': item['Product ID'], 'Product Name': item['Product Name'], 'Category': item['Category'],
+        'Cost Price': item['Cost Price'], 'Selling Price': item['Selling Price'], 'Stock': currentStock - transferQty,
+      }, fromId);
+
+      const toInv = await sheetToObjects('Inventory', toId);
+      const match = toInv.find(r => String(r['Product Name']).toLowerCase().trim() === String(item['Product Name']).toLowerCase().trim() && r['Category'] !== 'Mobiles');
+      if (match) {
+        const matchStock = parseFloat(match['Stock']) || 0;
+        await upsertRow('Inventory', str(match['Product ID']), {
+          'Product ID': match['Product ID'], 'Product Name': match['Product Name'], 'Category': match['Category'],
+          'Cost Price': match['Cost Price'], 'Selling Price': match['Selling Price'], 'Stock': matchStock + transferQty,
+        }, toId);
+      } else {
+        const newId = 'P' + String(Date.now()).slice(-6) + Math.floor(Math.random() * 90 + 10);
+        await upsertRow('Inventory', newId, {
+          'Product ID': newId, 'Product Name': item['Product Name'], 'Category': item['Category'],
+          'Subcategory': item['Subcategory'], 'Brand': item['Brand'], 'HSN Code': item['HSN Code'],
+          'Cost Price': item['Cost Price'], 'Selling Price': item['Selling Price'], 'Stock': transferQty,
+          'Supplier Name': item['Supplier Name'],
+        }, toId);
+      }
+    }
+
+    await logActivity(fromId, req.user.username, req.user.role, 'Stock Transferred Out', transferQty + 'x ' + item['Product Name'] + ' → ' + toBranch);
+    await logActivity(toId, req.user.username, req.user.role, 'Stock Transferred In', transferQty + 'x ' + item['Product Name'] + ' ← ' + req.branch);
+    return { success: true };
   });
 });
 
@@ -478,6 +626,15 @@ router.post('/sales/record', (req, res) => {
     // has gaps and never collides with the other branch's numbering.
     const invoiceNo = invoicePrefixFor(req.branch) + '-' + String(existingSales.length + 1).padStart(6, '0');
 
+    // For the GST summary report: taxable value is what's left after discount,
+    // before tax; GST amount is the tax portion of the total. Both come from
+    // the cart figures the frontend already computed at checkout.
+    const subtotal = parseFloat(payload.subtotal) || revenue;
+    const discount  = parseFloat(payload.discount) || 0;
+    const gstPct    = parseFloat(payload.gstPct) || 0;
+    const taxableValue = Math.max(0, subtotal - discount);
+    const gstAmount     = Math.max(0, revenue - taxableValue);
+
     // Log the sale
     await upsertRow('Sales', payload.invoiceNo, {
       'Sale ID':              payload.invoiceNo,
@@ -493,6 +650,8 @@ router.post('/sales/record', (req, res) => {
       'UPI Amount':           upiAmount,
       'Invoice No':           invoiceNo,
       'Status':               'Completed',
+      'Taxable Value':        taxableValue,
+      'GST Amount':           gstAmount,
     }, spreadsheetId);
 
     // Update or create customer row
@@ -611,7 +770,21 @@ router.post('/sales/refund', requireAdmin, (req, res) => {
     }
 
     await logActivity(spreadsheetId, req.user.username, req.user.role, 'Sale Refunded', saleId);
-    return { success: true, restockedItems: soldItems.length };
+    return {
+      success: true,
+      restockedItems: soldItems.length,
+      creditNote: {
+        invoiceNo: sale['Invoice No'] || sale['Sale ID'],
+        date: today(),
+        customerName: sale['Item/Customer Name'],
+        mobile: sale['Customer Mobile'],
+        revenue: parseFloat(sale['Revenue']) || 0,
+        items: soldItems.map(i => ({
+          name: i['Product Name'], qty: parseFloat(i['Qty']) || 0,
+          price: parseFloat(i['Price']) || 0, amount: parseFloat(i['Amount']) || 0,
+        })),
+      },
+    };
   });
 });
 
