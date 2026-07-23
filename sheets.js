@@ -109,7 +109,8 @@ function resolveBranchSheetId(branch) {
 const TABS = {
   Inventory: ['Product ID','Product Name','Category','Subcategory','Brand','Model','HSN Code','IMEI','Batch No','Cost Price','Selling Price','Stock','Supplier Name','Invoice No','Invoice Date'],
   Customers: ['Customer ID','Customer Name','Mobile Number','WhatsApp Number','Purchase History','Pending Amount','Description'],
-  Sales:     ['Sale ID','Date','Item/Customer Name','Customer Mobile','Type (Product/Repair)','Revenue','Cost','Profit','Payment Mode','Cash Amount','UPI Amount','Invoice No','Status'],
+  Sales:     ['Sale ID','Date','Item/Customer Name','Customer Mobile','Type (Product/Repair)','Revenue','Cost','Profit','Payment Mode','Cash Amount','UPI Amount','Invoice No','Status','Taxable Value','GST Amount'],
+  Quotations:['Quote ID','Date','Customer Name','Customer Mobile','Items JSON','Subtotal','Discount','GST Pct','Total','Status'],
   SaleItems: ['Row ID','Sale ID','Product ID','Product Name','Qty','Price','Amount'],
   Repairs:   ['Repair ID','Date','Customer Name','Phone','Brand','Model','Issue','Part Used (Product ID)','Repair Charge','Technician Cost','Status'],
   Expenses:  ['Expense ID','Date','Category','Amount','Notes'],
