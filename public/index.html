@@ -90,6 +90,7 @@
             <li class="nav-item"><a href="#" onclick="app.showView('inventory',this)"><i class="fas fa-boxes-stacked"></i> Inventory</a></li>
             <li class="nav-item"><a href="#" onclick="app.showView('finance',this)"><i class="fas fa-hand-holding-dollar"></i> Finance Tracker</a></li>
             <li class="nav-item"><a href="#" onclick="app.showView('repairs',this)"><i class="fas fa-tools"></i> Repairs</a></li>
+            <li class="nav-item"><a href="#" onclick="app.showView('quotations',this)"><i class="fas fa-file-lines"></i> Quotations</a></li>
             <li class="nav-item"><a href="#" onclick="app.showView('customers',this)"><i class="fas fa-users"></i> Customers</a></li>
             <li class="nav-item admin-only"><a href="#" onclick="app.showView('expenses',this)"><i class="fas fa-receipt"></i> Expenses</a></li>
             <li class="nav-item admin-only"><a href="#" onclick="app.showView('settings',this)"><i class="fas fa-gear"></i> Settings</a></li>
@@ -121,7 +122,7 @@
                     <div class="col-md-3 col-sm-6"><div class="kpi-card warning" style="cursor:pointer" onclick="app.showView('inventory', document.querySelector('#nav-menu li:nth-child(3) a'))"><div class="kpi-title"><i class="fas fa-triangle-exclamation me-1"></i>Low Stock Items</div><div class="kpi-value"><span id="kpi-lowstock">0</span></div></div></div>
                 </div>
                 <div class="row mt-3">
-                    <div class="col-md-8"><div class="data-card h-100"><div class="d-flex justify-content-between align-items-center"><h6 class="m-0">Sales Trend</h6><button class="btn btn-sm btn-outline-secondary" onclick="app.exportSalesCSV()"><i class="fas fa-file-csv"></i> Export Sales CSV</button></div><div id="chart_sales" style="width:100%;height:300px"></div></div></div>
+                    <div class="col-md-8"><div class="data-card h-100"><div class="d-flex justify-content-between align-items-center"><h6 class="m-0">Sales Trend</h6><div><button class="btn btn-sm btn-outline-secondary me-1" onclick="app.exportSalesCSV()"><i class="fas fa-file-csv"></i> Export Sales CSV</button><button class="btn btn-sm btn-outline-secondary" onclick="app.exportGSTReportCSV()"><i class="fas fa-receipt"></i> GST Summary CSV</button></div></div><div id="chart_sales" style="width:100%;height:300px"></div></div></div>
                     <div class="col-md-4"><div class="data-card h-100"><h6>Revenue Split</h6><div id="chart_revenue" style="width:100%;height:300px"></div></div></div>
                 </div>
             </div>
@@ -173,7 +174,8 @@
                                 <input type="number" id="pos-fin-downpayment" class="form-control form-control-sm mb-1" value="0" placeholder="Down Payment" oninput="app.calculateCart()">
                                 <small>Financed: &#8377;<span id="pos-fin-loan-amount-text">0.00</span></small>
                             </div>
-                            <button class="btn btn-success w-100" onclick="app.completeSale()"><i class="fas fa-check-circle"></i> Complete Sale</button>
+                            <button class="btn btn-success w-100 mb-2" onclick="app.completeSale()"><i class="fas fa-check-circle"></i> Complete Sale</button>
+                            <button class="btn btn-outline-primary w-100" onclick="app.saveAsQuotation()"><i class="fas fa-file-lines"></i> Save as Quotation</button>
                         </div>
                     </div>
                 </div>
@@ -232,6 +234,22 @@
                         <table class="table table-hover align-middle">
                             <thead class="table-light"><tr><th>Job Card</th><th>Date</th><th>Customer</th><th>Device</th><th>Status</th><th>Total</th><th>Action</th></tr></thead>
                             <tbody id="repairs-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- QUOTATIONS -->
+            <div id="view-quotations" class="view-section hidden">
+                <div class="data-card">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h5 class="m-0">Quotations / Estimates</h5>
+                        <span class="text-muted small">Create these from the Cart in POS Billing ("Save as Quotation")</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light"><tr><th>Quote No</th><th>Date</th><th>Customer</th><th>Total</th><th>Status</th><th>Action</th></tr></thead>
+                            <tbody id="quotations-tbody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -346,6 +364,28 @@
             <div class="mb-3" id="prod-stock-wrap"><label>Stock</label><input type="number" id="prod-stock" class="form-control" value="1"></div>
         </div>
         <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" onclick="app.saveProduct()">Save Product</button></div>
+    </div></div>
+</div>
+
+<!-- TRANSFER STOCK BETWEEN BRANCHES -->
+<div class="modal fade" id="transferModal" tabindex="-1">
+    <div class="modal-dialog"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title"><i class="fas fa-right-left text-info me-2"></i>Transfer Stock</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <input type="hidden" id="transfer-product-id">
+            <p class="mb-1"><strong id="transfer-product-name"></strong></p>
+            <p class="text-muted small mb-3">Currently at <strong id="transfer-from-branch"></strong> — Available stock: <span id="transfer-available-stock"></span></p>
+            <div class="mb-3">
+                <label>Transfer to</label>
+                <select id="transfer-to-branch" class="form-select"></select>
+            </div>
+            <div class="mb-3" id="transfer-qty-wrap">
+                <label>Quantity</label>
+                <input type="number" id="transfer-qty" class="form-control" value="1" min="1">
+            </div>
+            <div id="transfer-mobile-note" class="alert alert-light border small hidden">This is a Mobile (unique IMEI) — the entire unit moves as one, quantity isn't applicable.</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-info text-white" onclick="app.confirmTransfer()">Transfer</button></div>
     </div></div>
 </div>
 
@@ -535,6 +575,7 @@ var db = {
     expenses:  [],
     sales:     [],
     finance:   [],
+    quotations: [],
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -594,7 +635,7 @@ var app = {
     // Maps one /crm-data response into the shape our local db.* arrays use.
     // Shared by the single-branch load and the combined all-branches load.
     _mapCrmData: function(data, branchTag) {
-        var out = { products: [], customers: [], repairs: [], expenses: [], sales: [], finance: [] };
+        var out = { products: [], customers: [], repairs: [], expenses: [], sales: [], finance: [], quotations: [] };
         if (data.Inventory) {
             out.products = data.Inventory.map(function(item) {
                 return {
@@ -667,6 +708,18 @@ var app = {
                 };
             });
         }
+        if (data.Quotations) {
+            out.quotations = data.Quotations.map(function(q) {
+                var items = [];
+                try { items = JSON.parse(q.itemsJson || '[]'); } catch (e) { items = []; }
+                return {
+                    id: q.id || '', date: q.date || '', customer: q.customer || '', mobile: q.mobile || '',
+                    items: items, subtotal: parseFloat(q.subtotal||0), discount: parseFloat(q.discount||0),
+                    gstPct: parseFloat(q.gstPct||0), total: parseFloat(q.total||0), status: q.status || 'Open',
+                    branch: branchTag || null,
+                };
+            });
+        }
         return out;
     },
 
@@ -680,7 +733,7 @@ var app = {
             var branches = this.availableBranches || [];
             return Promise.all(branches.map(function(b) { return api.get('/crm-data', b); }))
                 .then(function(results) {
-                    db.products = []; db.customers = []; db.repairs = []; db.expenses = []; db.sales = []; db.finance = [];
+                    db.products = []; db.customers = []; db.repairs = []; db.expenses = []; db.sales = []; db.finance = []; db.quotations = [];
                     results.forEach(function(data, i) {
                         var mapped = self._mapCrmData(data, branches[i]);
                         db.products  = db.products.concat(mapped.products);
@@ -689,6 +742,7 @@ var app = {
                         db.expenses  = db.expenses.concat(mapped.expenses);
                         db.sales     = db.sales.concat(mapped.sales);
                         db.finance   = db.finance.concat(mapped.finance);
+                        db.quotations= db.quotations.concat(mapped.quotations);
                     });
                     self.loadDashboard();
                 }).catch(function(err) {
@@ -706,6 +760,7 @@ var app = {
             db.expenses  = mapped.expenses;
             db.sales     = mapped.sales;
             db.finance   = mapped.finance;
+            db.quotations= mapped.quotations;
             self.loadDashboard();
         }).catch(function(err) {
             console.error('Failed to load CRM data:', err);
@@ -847,6 +902,10 @@ var app = {
         document.getElementById('user-role-badge').innerText = this.user.role === 'admin' ? 'Admin' : 'Staff';
         this.applyRolePermissions();
         this.setupBranch().then(function() {
+            if (!self.currentBranch) {
+                self.showAlert('Could not determine which branch to load — the server may be running an outdated version. Contact your admin.', 'danger');
+                return; // don't call loadFromServer with no branch — that's what produces the confusing "Missing branch" error
+            }
             self.showView('dashboard', null);
             self.loadFromServer();
         });
@@ -926,7 +985,7 @@ var app = {
         if (target) target.classList.remove('hidden');
         document.querySelectorAll('#nav-menu li').forEach(function(li) { li.classList.remove('active'); });
         if (linkEl && linkEl.parentElement) linkEl.parentElement.classList.add('active');
-        var titles = {dashboard:'Dashboard',billing:'POS Billing',inventory:'Inventory',finance:'Finance Tracker',repairs:'Repairs',customers:'Customers',expenses:'Expenses',settings:'Settings'};
+        var titles = {dashboard:'Dashboard',billing:'POS Billing',inventory:'Inventory',finance:'Finance Tracker',repairs:'Repairs',quotations:'Quotations',customers:'Customers',expenses:'Expenses',settings:'Settings'};
         if (viewId === 'settings') app.loadUsersForSettings();
         document.getElementById('topbar-title').innerText = titles[viewId] || viewId;
         if (viewId==='dashboard')  this.loadDashboard();
@@ -934,6 +993,7 @@ var app = {
         if (viewId==='inventory')  this.renderInventory();
         if (viewId==='finance')    this.renderFinance();
         if (viewId==='repairs')    this.renderRepairs();
+        if (viewId==='quotations') this.renderQuotations();
         if (viewId==='customers')  this.renderCustomers();
         if (viewId==='expenses')   this.renderExpenses();
         if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('active');
@@ -1152,6 +1212,9 @@ var app = {
             customerName: name,
             mobile:       mobile,
             total:        total,
+            subtotal:     subtotal,
+            discount:     discount,
+            gstPct:       gstPct,
             paymentMode:  paymentMode,
             cashAmount:   cashAmount,
             upiAmount:    upiAmount,
@@ -1202,6 +1265,148 @@ var app = {
     },
 
     // ── PDF Invoice generation (client-side, styled after the shop's Swipe invoice) ──
+    // ── Quotations (estimates — no stock/sales impact until converted) ──
+    saveAsQuotation: function() {
+        var self = this;
+        if (!this.cart.length) { this.showAlert('Cart is empty', 'warning'); return; }
+        var name = document.getElementById('cart-customer-name').value.trim() || 'Walk-in';
+        var mobile = document.getElementById('cart-customer-mobile').value.trim();
+        var subtotal = parseFloat(document.getElementById('cart-subtotal').innerText);
+        var discount = parseFloat(document.getElementById('cart-discount').value) || 0;
+        var gstPct   = parseFloat(document.getElementById('cart-gst').value) || 0;
+        var total    = parseFloat(document.getElementById('cart-total').innerText);
+        var items = this.cart.map(function(item){ return { id: item.id, name: item.name, qty: item.qty, price: item.price }; });
+
+        api.post('/quotes/save', { customerName: name, mobile: mobile, items: items, subtotal: subtotal, discount: discount, gstPct: gstPct, total: total })
+        .then(function(result) {
+            self.showAlert('Quotation ' + result.id + ' saved — find it under Quotations.', 'success');
+            self.cart = []; self.renderCart(); self.renderPOSProducts();
+            document.getElementById('cart-customer-mobile').value = '';
+            document.getElementById('cart-customer-name').value   = '';
+            self.loadFromServer();
+        }).catch(function(err) { self.showAlert('Could not save quotation: ' + err.message, 'danger'); });
+    },
+
+    renderQuotations: function() {
+        var tbody = document.getElementById('quotations-tbody');
+        tbody.innerHTML = '';
+        if (!db.quotations.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No quotations yet</td></tr>'; return; }
+        db.quotations.slice().reverse().forEach(function(q) {
+            var badge = q.status === 'Converted' ? 'bg-success' : q.status === 'Expired' ? 'bg-secondary' : 'bg-warning text-dark';
+            var actions = '<button class="btn btn-sm btn-outline-primary me-1" onclick="app.loadQuoteToCart(\''+q.id+'\')" title="Load into POS Cart"><i class="fas fa-cart-plus"></i></button>' +
+                '<button class="btn btn-sm btn-outline-secondary me-1" onclick="app.downloadQuotationPDF(\''+q.id+'\')" title="Download PDF"><i class="fas fa-download"></i></button>';
+            if (q.status === 'Open') {
+                actions += '<button class="btn btn-sm btn-outline-success me-1" onclick="app.markQuoteStatus(\''+q.id+'\',\'Converted\')" title="Mark Converted"><i class="fas fa-check"></i></button>';
+            }
+            actions += '<button class="btn btn-sm btn-outline-danger" onclick="app.deleteQuote(\''+q.id+'\')" title="Delete"><i class="fas fa-trash"></i></button>';
+            tbody.innerHTML += '<tr><td><strong>'+q.id+'</strong></td><td>'+q.date+'</td><td>'+q.customer+'</td><td>&#8377;'+q.total.toFixed(2)+'</td><td><span class="badge '+badge+'">'+q.status+'</span></td><td>'+actions+'</td></tr>';
+        });
+    },
+
+    loadQuoteToCart: function(quoteId) {
+        var q = db.quotations.find(function(x){ return x.id === quoteId; });
+        if (!q) return;
+        this.cart = q.items.map(function(item) {
+            var p = db.products.find(function(x){ return x.id === item.id; });
+            return { id: item.id, name: item.name, price: (p ? p.price : item.price), qty: item.qty };
+        });
+        document.getElementById('cart-customer-name').value = q.customer;
+        document.getElementById('cart-customer-mobile').value = q.mobile;
+        document.getElementById('cart-discount').value = q.discount;
+        document.getElementById('cart-gst').value = q.gstPct;
+        this.showView('billing', document.querySelector('#nav-menu li:nth-child(2) a'));
+        this.renderCart();
+        this.showAlert('Quotation loaded into cart — review stock/prices, then Complete Sale.', 'info');
+    },
+
+    markQuoteStatus: function(quoteId, status) {
+        var self = this;
+        api.post('/quotes/status', { quoteId: quoteId, status: status }).then(function() {
+            var q = db.quotations.find(function(x){ return x.id === quoteId; });
+            if (q) q.status = status;
+            self.renderQuotations();
+        }).catch(function(err) { self.showAlert('Failed: ' + err.message, 'danger'); });
+    },
+
+    deleteQuote: function(quoteId) {
+        var self = this;
+        this.showConfirm('Delete this quotation?', function() {
+            api.post('/quotes/delete', { quoteId: quoteId }).then(function() {
+                db.quotations = db.quotations.filter(function(x){ return x.id !== quoteId; });
+                self.renderQuotations();
+                self.showAlert('Quotation deleted', 'success');
+            }).catch(function(err) { self.showAlert('Failed: ' + err.message, 'danger'); });
+        });
+    },
+
+    downloadQuotationPDF: function(quoteId) {
+        var self = this;
+        var q = db.quotations.find(function(x){ return x.id === quoteId; });
+        if (!q) return;
+        this._loadJsPDF(function(err) {
+            if (err) { self.showAlert('Could not generate PDF: ' + err.message, 'danger'); return; }
+            try {
+                var jsPDF = window.jspdf.jsPDF;
+                var doc = new jsPDF({ unit: 'pt', format: 'a4' });
+                var pageW = doc.internal.pageSize.getWidth();
+                var marginX = 40, y = 50;
+                var shop = self.SHOP_INFO;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+                doc.text(shop.name, marginX, y);
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                y += 16; doc.text(shop.gstin, marginX, y);
+                y += 13; doc.text(shop.mobile, marginX, y);
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+                doc.text('QUOTATION', pageW - marginX, 50, { align: 'right' });
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                doc.text('Quote #: ' + q.id, pageW - marginX, 66, { align: 'right' });
+                doc.text('Date: ' + q.date, pageW - marginX, 80, { align: 'right' });
+
+                y = Math.max(y, 80) + 25;
+                doc.setDrawColor(200); doc.line(marginX, y, pageW - marginX, y); y += 20;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+                doc.text('For:', marginX, y);
+                doc.setFont('helvetica', 'normal');
+                y += 14; doc.text(q.customer || '', marginX, y);
+                y += 14; doc.text('Ph: ' + (q.mobile || ''), marginX, y);
+                y += 25;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+                doc.text('Item', marginX, y); doc.text('Qty', 350, y); doc.text('Rate', 400, y); doc.text('Amount', pageW - marginX, y, { align: 'right' });
+                y += 6; doc.line(marginX, y, pageW - marginX, y); y += 14;
+                doc.setFont('helvetica', 'normal');
+                (q.items || []).forEach(function(item) {
+                    doc.text(item.name || '', marginX, y);
+                    doc.text(String(item.qty), 350, y);
+                    doc.text((item.price||0).toFixed(2), 400, y);
+                    doc.text(((item.price||0) * (item.qty||0)).toFixed(2), pageW - marginX, y, { align: 'right' });
+                    y += 14;
+                });
+                y += 8; doc.line(marginX, y, pageW - marginX, y); y += 20;
+
+                function row(label, value, bold) {
+                    doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(bold ? 11 : 9);
+                    doc.text(label, 380, y); doc.text(value, pageW - marginX, y, { align: 'right' }); y += bold ? 16 : 13;
+                }
+                row('Subtotal:', '\u20B9' + q.subtotal.toFixed(2));
+                if (q.discount) row('Discount:', '-\u20B9' + q.discount.toFixed(2));
+                if (q.gstPct) row('GST ' + q.gstPct + '%:', '\u20B9' + (q.total - (q.subtotal - q.discount)).toFixed(2));
+                row('Estimated Total:', '\u20B9' + q.total.toFixed(2), true);
+
+                y += 30;
+                doc.setFont('helvetica', 'italic'); doc.setFontSize(9);
+                doc.text('This is an estimate, not a tax invoice. Prices may change based on stock availability.', marginX, y);
+
+                doc.save('Quotation-' + q.id + '.pdf');
+            } catch (e) {
+                self.showAlert('PDF generation failed: ' + e.message, 'danger');
+            }
+        });
+    },
+
     _loadJsPDF: function(cb) {
         if (window.jspdf && window.jspdf.jsPDF) { cb(); return; }
         var CDNS = [
@@ -1405,11 +1610,13 @@ var app = {
     renderInventory: function() {
         var tbody = document.getElementById('inventory-tbody');
         tbody.innerHTML = '';
+        var isAdmin = this.user.role === 'admin';
         db.products.forEach(function(p) {
             var badge = p.stock<=0 ? '<span class="badge bg-danger">Out</span>' : p.stock<=5 ? '<span class="badge bg-warning text-dark">'+p.stock+' Low</span>' : '<span class="badge bg-success">'+p.stock+'</span>';
             var catBadge = '<span class="badge bg-secondary">'+p.category+(p.subcategory?' / '+p.subcategory:'')+'</span>';
             var modelImei = p.category==='Mobiles' ? ((p.model||'&mdash;')+'<br><small class="text-muted">'+(p.imei||'')+'</small>') : (p.model||'&mdash;');
-            tbody.innerHTML += '<tr><td><code>'+p.id+'</code></td><td><strong>'+p.name+'</strong></td><td>'+catBadge+'</td><td>'+modelImei+'</td><td>'+(p.supplier||'&mdash;')+'</td><td>'+badge+'</td><td>&#8377;'+(p.pprice||0)+'</td><td>&#8377;'+(p.price||0)+'</td><td><button class="btn btn-sm btn-outline-primary me-1" onclick="app.editProduct(\''+p.id+'\')"><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-outline-danger" onclick="app.deleteProduct(\''+p.id+'\')"><i class="fas fa-trash"></i></button></td></tr>';
+            var transferBtn = (isAdmin && p.stock > 0) ? '<button class="btn btn-sm btn-outline-info me-1" onclick="app.openTransferModal(\''+p.id+'\')" title="Transfer to other branch"><i class="fas fa-right-left"></i></button>' : '';
+            tbody.innerHTML += '<tr><td><code>'+p.id+'</code></td><td><strong>'+p.name+'</strong></td><td>'+catBadge+'</td><td>'+modelImei+'</td><td>'+(p.supplier||'&mdash;')+'</td><td>'+badge+'</td><td>&#8377;'+(p.pprice||0)+'</td><td>&#8377;'+(p.price||0)+'</td><td>'+transferBtn+'<button class="btn btn-sm btn-outline-primary me-1" onclick="app.editProduct(\''+p.id+'\')"><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-outline-danger" onclick="app.deleteProduct(\''+p.id+'\')"><i class="fas fa-trash"></i></button></td></tr>';
         });
     },
 
@@ -1511,6 +1718,46 @@ var app = {
                 self.showAlert('Product deleted!', 'success');
             }).catch(function(err) { self.showAlert('Delete failed: ' + err.message, 'danger'); });
         });
+    },
+
+    // ── Stock Transfer between branches (admin only) ────────────────────
+    openTransferModal: function(productId) {
+        var p = db.products.find(function(x){ return x.id === productId; });
+        if (!p) return;
+        document.getElementById('transfer-product-id').value = productId;
+        document.getElementById('transfer-product-name').innerText = p.name + (p.category==='Mobiles' ? (' — IMEI: ' + p.imei) : '');
+        document.getElementById('transfer-from-branch').innerText = this.currentBranch;
+        document.getElementById('transfer-available-stock').innerText = p.stock;
+
+        var otherBranches = (this.availableBranches || []).filter(function(b){ return b !== app.currentBranch; });
+        var sel = document.getElementById('transfer-to-branch');
+        sel.innerHTML = otherBranches.map(function(b){ return '<option value="'+b+'">'+b+'</option>'; }).join('');
+
+        var isMobile = p.category === 'Mobiles';
+        document.getElementById('transfer-qty-wrap').classList.toggle('hidden', isMobile);
+        document.getElementById('transfer-mobile-note').classList.toggle('hidden', !isMobile);
+        var qtyInput = document.getElementById('transfer-qty');
+        qtyInput.value = 1;
+        qtyInput.max = p.stock;
+
+        this.openModal('transferModal');
+    },
+
+    confirmTransfer: function() {
+        var self = this;
+        var productId = document.getElementById('transfer-product-id').value;
+        var toBranch  = document.getElementById('transfer-to-branch').value;
+        var p = db.products.find(function(x){ return x.id === productId; });
+        var qty = (p && p.category === 'Mobiles') ? 1 : (parseInt(document.getElementById('transfer-qty').value) || 0);
+        if (!toBranch) { this.showAlert('Choose a destination branch', 'warning'); return; }
+        if (qty <= 0) { this.showAlert('Enter a valid quantity', 'warning'); return; }
+        if (p && qty > p.stock) { this.showAlert('Cannot transfer more than available stock', 'warning'); return; }
+
+        api.post('/inventory/transfer', { productId: productId, qty: qty, toBranch: toBranch }).then(function() {
+            self.showAlert('Transferred ' + qty + ' unit(s) to ' + toBranch + '.', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('transferModal')).hide();
+            self.loadFromServer().then(function(){ self.renderInventory(); self.renderPOSProducts(); });
+        }).catch(function(err) { self.showAlert('Transfer failed: ' + err.message, 'danger'); });
     },
 
     // ── Finance ───────────────────────────────────────────────────────
@@ -1696,8 +1943,19 @@ var app = {
         tbody.innerHTML = '';
         db.customers.forEach(function(c) {
             var m = String(c.mobile || '').replace(/\D/g, ''); if (m.length === 10) m = '91' + m;
-            tbody.innerHTML += '<tr><td><strong>'+c.name+'</strong></td><td>'+c.mobile+'</td><td class="fw-bold">&#8377;'+parseFloat(c.total).toFixed(2)+'</td><td class="'+(c.pending>0?'text-danger fw-bold':'text-success')+'">&#8377;'+c.pending+'</td><td class="small text-muted">'+(c.description||'&mdash;')+'</td><td><button class="btn btn-sm btn-outline-secondary me-1" onclick="app.showCustomerHistory(\''+c.mobile+'\')" title="Purchase &amp; Repair History"><i class="fas fa-clock-rotate-left"></i></button><button class="btn btn-sm btn-outline-success" onclick="window.open(\'https://wa.me/'+m+'\',\'_blank\')" title="WhatsApp"><i class="fab fa-whatsapp"></i></button></td></tr>';
+            var reminderBtn = c.pending > 0
+                ? '<button class="btn btn-sm btn-outline-warning me-1" onclick="app.sendPaymentReminder(\''+c.mobile+'\')" title="Send Payment Reminder"><i class="fas fa-bell"></i></button>'
+                : '';
+            tbody.innerHTML += '<tr><td><strong>'+c.name+'</strong></td><td>'+c.mobile+'</td><td class="fw-bold">&#8377;'+parseFloat(c.total).toFixed(2)+'</td><td class="'+(c.pending>0?'text-danger fw-bold':'text-success')+'">&#8377;'+c.pending+'</td><td class="small text-muted">'+(c.description||'&mdash;')+'</td><td><button class="btn btn-sm btn-outline-secondary me-1" onclick="app.showCustomerHistory(\''+c.mobile+'\')" title="Purchase &amp; Repair History"><i class="fas fa-clock-rotate-left"></i></button>'+reminderBtn+'<button class="btn btn-sm btn-outline-success" onclick="window.open(\'https://wa.me/'+m+'\',\'_blank\')" title="WhatsApp"><i class="fab fa-whatsapp"></i></button></td></tr>';
         });
+    },
+
+    sendPaymentReminder: function(mobile) {
+        var c = db.customers.find(function(x){ return x.mobile === mobile; });
+        if (!c) return;
+        var m = String(c.mobile || '').replace(/\D/g, ''); if (m.length === 10) m = '91' + m;
+        var msg = 'Hello ' + c.name + ', this is a friendly reminder from Vimal Mobiles that you have a pending balance of \u20B9' + parseFloat(c.pending).toFixed(2) + '. Please clear it at your earliest convenience. Thank you!';
+        window.open('https://wa.me/' + m + '?text=' + encodeURIComponent(msg), '_blank');
     },
 
     // ── Customer purchase/repair history ────────────────────────────────
@@ -1738,12 +1996,75 @@ var app = {
         this.showConfirm('Refund this sale? This restocks the items and adjusts the customer\'s total. This cannot be undone.', function() {
             api.post('/sales/refund', { saleId: saleId }).then(function(result) {
                 self.showAlert('Refund processed — ' + result.restockedItems + ' item(s) restocked.', 'success');
+                if (result.creditNote) self.generateCreditNotePDF(result.creditNote);
                 return self.loadFromServer(); // pull fresh stock/sales/customer state from the sheet
             }).then(function() {
                 self.showCustomerHistory(mobile); // keep the modal open, now showing refreshed data
             }).catch(function(err) {
                 self.showAlert('Refund failed: ' + err.message, 'danger');
             });
+        });
+    },
+
+    generateCreditNotePDF: function(cn) {
+        var self = this;
+        this._loadJsPDF(function(err) {
+            if (err) { self.showAlert('Could not generate Credit Note PDF: ' + err.message, 'danger'); return; }
+            try {
+                var jsPDF = window.jspdf.jsPDF;
+                var doc = new jsPDF({ unit: 'pt', format: 'a4' });
+                var pageW = doc.internal.pageSize.getWidth();
+                var marginX = 40, y = 50;
+                var shop = self.SHOP_INFO;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+                doc.text(shop.name, marginX, y);
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                y += 16; doc.text(shop.gstin, marginX, y);
+                y += 13; doc.text(shop.mobile, marginX, y);
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(200, 0, 0);
+                doc.text('CREDIT NOTE', pageW - marginX, 50, { align: 'right' });
+                doc.setTextColor(0, 0, 0);
+                doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+                doc.text('Against Invoice: ' + cn.invoiceNo, pageW - marginX, 66, { align: 'right' });
+                doc.text('Date: ' + cn.date, pageW - marginX, 80, { align: 'right' });
+
+                y = Math.max(y, 80) + 25;
+                doc.setDrawColor(200); doc.line(marginX, y, pageW - marginX, y); y += 20;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+                doc.text('Customer:', marginX, y);
+                doc.setFont('helvetica', 'normal');
+                y += 14; doc.text(cn.customerName || '', marginX, y);
+                y += 14; doc.text('Ph: ' + (cn.mobile || ''), marginX, y);
+                y += 25;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+                doc.text('Item', marginX, y); doc.text('Qty', 350, y); doc.text('Rate', 400, y); doc.text('Amount', pageW - marginX, y, { align: 'right' });
+                y += 6; doc.line(marginX, y, pageW - marginX, y); y += 14;
+                doc.setFont('helvetica', 'normal');
+                (cn.items || []).forEach(function(item) {
+                    doc.text(item.name || '', marginX, y);
+                    doc.text(String(item.qty), 350, y);
+                    doc.text(item.price.toFixed(2), 400, y);
+                    doc.text(item.amount.toFixed(2), pageW - marginX, y, { align: 'right' });
+                    y += 14;
+                });
+                y += 8; doc.line(marginX, y, pageW - marginX, y); y += 20;
+
+                doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+                doc.text('Total Refunded:', 350, y);
+                doc.text('\u20B9' + cn.revenue.toFixed(2), pageW - marginX, y, { align: 'right' });
+
+                y += 40;
+                doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(100);
+                doc.text('This credit note confirms the above amount has been refunded to the customer.', marginX, y);
+
+                doc.save('Credit-Note-' + cn.invoiceNo + '.pdf');
+            } catch (e) {
+                self.showAlert('Credit Note PDF generation failed: ' + e.message, 'danger');
+            }
         });
     },
 
@@ -2284,6 +2605,17 @@ var app = {
             });
         }).catch(function(err) { self.showAlert('Could not read file: ' + err.message, 'danger'); });
         ev.target.value = '';
+    },
+
+    exportGSTReportCSV: function() {
+        var salesWithGst = (db.sales || []).filter(function(s){ return s.status !== 'Refunded'; });
+        this.exportCSV('gst-summary-' + (this.currentBranch||'export') + '.csv', salesWithGst, [
+            { label: 'Date', value: 'date' }, { label: 'Invoice No', value: 'invoiceNo' },
+            { label: 'Taxable Value', value: function(r){ return (r.taxableValue||0).toFixed(2); } },
+            { label: 'GST Amount', value: function(r){ return (r.gstAmount||0).toFixed(2); } },
+            { label: 'Total (incl. GST)', value: function(r){ return r.revenue.toFixed(2); } },
+            { label: 'Branch', value: function(r){ return r.branch || app.currentBranch; } },
+        ]);
     },
 
     openModal: function(id) {
